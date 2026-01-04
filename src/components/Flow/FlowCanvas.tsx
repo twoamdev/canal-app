@@ -20,7 +20,7 @@ export function FlowCanvas() {
 
     const onConnect: OnConnect = useCallback(
         (params) => setEdges((edgesSnapshot) => addEdge(params, edgesSnapshot)),
-        [],
+        [setEdges],
     );
 
     const onDrop = useCallback(
@@ -37,7 +37,7 @@ export function FlowCanvas() {
     return (
         <div
             style={{ width: '100vw', height: '100vh' }}
-            onDrop={onDrop} // Handle file drop
+            onDrop={onDrop}
             onDragOver={handleFileDragOver}
         >
             <ReactFlow
