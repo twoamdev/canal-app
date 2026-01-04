@@ -1,15 +1,12 @@
 import { useCallback } from 'react';
-import { useReactFlow, type Node, type XYPosition } from '@xyflow/react';
-import { opfsManager, type OPFSFileMetadata } from '../utils/opfs';
-
-export interface FileNodeData {
-  label: string;
-  file: OPFSFileMetadata;
-  [key: string]: unknown;
-}
+import { useReactFlow, type XYPosition } from '@xyflow/react';
+import { opfsManager } from '../utils/opfs';
+import { useGraphStore } from '../stores/graphStore';
+import type { FileNode } from '../types/nodes';
 
 export function useDragAndDropFiles() {
-  const { setNodes, screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition } = useReactFlow();
+  const addNode = useGraphStore((state) => state.addNode);
 
   const handleFileDrop = useCallback(
     async (event: React.DragEvent, position: XYPosition) => {
@@ -18,23 +15,19 @@ export function useDragAndDropFiles() {
       const files = Array.from(event.dataTransfer.files);
       const flowPosition = screenToFlowPosition(position);
 
-      // Process files asynchronously
       const nodePromises = files.map(async (file, index) => {
         try {
-          // Store file in OPFS (will auto-init if needed, or throw if not supported)
           const opfsPath = await opfsManager.storeFile(file);
           const metadata = await opfsManager.getFileMetadata(opfsPath);
 
-          // Offset multiple files slightly so they don't overlap
           const offsetPosition = {
             x: flowPosition.x + (index * 50),
             y: flowPosition.y + (index * 50),
           };
 
-          // Create node with OPFS reference
-          const newNode: Node<FileNodeData> = {
+          const newNode: FileNode = {
             id: `file-node-${Date.now()}-${index}`,
-            type: 'default', // We'll create custom node types later
+            type: 'file',
             position: offsetPosition,
             data: {
               label: file.name,
@@ -42,6 +35,7 @@ export function useDragAndDropFiles() {
             },
           };
 
+          addNode(newNode);
           return newNode;
         } catch (error) {
           console.error(`Failed to process file ${file.name}:`, error);
@@ -49,24 +43,9 @@ export function useDragAndDropFiles() {
         }
       });
 
-      // Wait for all files to be processed
-      const newNodes = await Promise.all(nodePromises);
-      
-      // Filter out null values (failed files) and add to graph
-      const validNodes = newNodes.filter((node): node is Node<FileNodeData> => node !== null);
-      
-      if (validNodes.length > 0) {
-        setNodes((nodes: Node[]) => nodes.concat(validNodes));
-      }
-
-      // Show user feedback if some files failed
-      const failedCount = files.length - validNodes.length;
-      if (failedCount > 0) {
-        console.warn(`${failedCount} file(s) failed to load`);
-        // You could add a toast notification here
-      }
+      await Promise.all(nodePromises);
     },
-    [screenToFlowPosition, setNodes]
+    [screenToFlowPosition, addNode]
   );
 
   const handleFileDragOver = useCallback((event: React.DragEvent) => {

@@ -1,26 +1,41 @@
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import {
     ReactFlow,
     addEdge,
     SelectionMode,
     type OnConnect,
-    useNodesState,
-    useEdgesState,
     Background,
     Controls,
 } from '@xyflow/react'
 import { useDragAndDropFiles } from '../../hooks/useDragAndDropFiles';
-import { initialNodes, initialEdges } from '../../constants/flow';
+import { useGraphStore } from '../../stores/graphStore';
+import { FileNode , BaseNode} from '../Nodes';
 
 export function FlowCanvas() {
-    const [nodes, _, onNodesChange] = useNodesState(initialNodes);
-    const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+    // Get state and actions from Zustand store
+    const nodes = useGraphStore((state) => state.nodes);
+    const edges = useGraphStore((state) => state.edges);
+    const setEdges = useGraphStore((state) => state.setEdges);
+    const onNodesChange = useGraphStore((state) => state.onNodesChange);
+    const onEdgesChange = useGraphStore((state) => state.onEdgesChange);
+    
     const { handleFileDrop, handleFileDragOver } = useDragAndDropFiles();
 
+    // Register custom node types
+    const nodeTypes = useMemo(
+        () => ({
+            file: FileNode,
+            default: BaseNode, // Use BaseNode as default for now
+        }),
+        []
+    );
 
     const onConnect: OnConnect = useCallback(
-        (params) => setEdges((edgesSnapshot) => addEdge(params, edgesSnapshot)),
-        [setEdges],
+        (params) => {
+            const newEdge = addEdge(params, edges);
+            setEdges(newEdge);
+        },
+        [edges, setEdges]
     );
 
     const onDrop = useCallback(
@@ -43,6 +58,7 @@ export function FlowCanvas() {
             <ReactFlow
                 nodes={nodes}
                 edges={edges}
+                nodeTypes={nodeTypes}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
