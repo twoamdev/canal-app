@@ -11,11 +11,23 @@ export interface BaseNodeData {
 }
 
 /**
+ * Extracted frames metadata (persisted)
+ */
+export interface ExtractedFramesInfo {
+  frameCount: number;
+  format: 'webp' | 'png' | 'jpeg';
+  width: number;
+  height: number;
+  duration: number;
+}
+
+/**
  * File node data - extends base data
  * This is still just the DATA part
  */
 export interface FileNodeData extends BaseNodeData {
   file: OPFSFileMetadata;
+  extractedFrames?: ExtractedFramesInfo;
 }
 
 /**

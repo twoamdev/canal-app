@@ -3,14 +3,28 @@ import { persist } from 'zustand/middleware';
 import type { Edge, NodeChange, EdgeChange } from '@xyflow/react';
 import { applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
 import { initialNodes, initialEdges } from '../constants/initialGraphNodes';
-import type { GraphNode } from '../types/nodes';
+import type { GraphNode, ExtractedFramesInfo } from '../types/nodes';
 import { opfsManager } from '../utils/opfs';
+import { deleteVideoFrames } from '../utils/frame-storage';
 
-// Helper function to clean up OPFS file if node has file data
+// Helper function to clean up OPFS file and extracted frames if node has file data
 async function cleanupNodeFile(node: GraphNode): Promise<void> {
   // Check if this is a file node with OPFS path
   if ('file' in node.data && node.data.file && typeof node.data.file === 'object') {
     const fileData = node.data.file as { opfsPath?: string };
+    const extractedFrames = (node.data as { extractedFrames?: ExtractedFramesInfo }).extractedFrames;
+
+    // Delete extracted frames if they exist
+    if (fileData.opfsPath && extractedFrames) {
+      try {
+        await deleteVideoFrames(fileData.opfsPath, extractedFrames.frameCount, extractedFrames.format);
+        console.log(`Deleted ${extractedFrames.frameCount} extracted frames for: ${fileData.opfsPath}`);
+      } catch (error) {
+        console.error(`Failed to delete extracted frames for ${fileData.opfsPath}:`, error);
+      }
+    }
+
+    // Delete original file
     if (fileData.opfsPath) {
       try {
         await opfsManager.deleteFile(fileData.opfsPath);
