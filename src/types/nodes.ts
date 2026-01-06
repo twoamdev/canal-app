@@ -19,6 +19,7 @@ export interface ExtractedFramesInfo {
   width: number;
   height: number;
   duration: number;
+  currentFrameIndex: number; // Last viewed frame (persisted for preview)
 }
 
 /**

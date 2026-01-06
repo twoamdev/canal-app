@@ -24,6 +24,7 @@ export interface ExtractFramesOptions {
     format?: FrameFormat;
     quality?: number;
     onProgress?: (current: number, total: number) => void;
+    maxConcurrency?: number; // Max frames to process simultaneously (default: 4)
 }
 
 /**
@@ -75,6 +76,7 @@ export async function processVideo(
 
 /**
  * Extract all frames from a video and save them to OPFS
+ * Uses a queue with concurrency limiting to avoid memory exhaustion
  * @param file - The OPFS file metadata
  * @param options - Format, quality, and progress callback options
  * @returns Promise with track info and stored frame info
@@ -83,9 +85,8 @@ export async function extractAndStoreFrames(
     file: OPFSFileMetadata,
     options: ExtractFramesOptions = {}
 ): Promise<ExtractFramesResult> {
-    const { format = 'webp', quality = 0.9, onProgress } = options;
+    const { format = 'webp', quality = 0.9, onProgress, maxConcurrency = 4 } = options;
     const frames: StoredFrameInfo[] = [];
-    const savePromises: Promise<void>[] = [];
 
     // First, demux to get chunk count and config
     const chunks: EncodedVideoChunk[] = [];
@@ -95,34 +96,76 @@ export async function extractAndStoreFrames(
 
     const totalFrames = demuxResult.trackInfo.frameCount;
 
-    // Now decode and save each frame
+    // Queue for frames waiting to be processed
+    const frameQueue: { frame: VideoFrame; index: number }[] = [];
+    let activeCount = 0;
+    let completedCount = 0;
+    let hasError = false;
+    let processingComplete = false;
+
+    // Resolve/reject handlers for the main promise
+    let resolveMain: (result: ExtractFramesResult) => void;
+    let rejectMain: (error: unknown) => void;
+
+    const processNext = async () => {
+        if (hasError || frameQueue.length === 0 || activeCount >= maxConcurrency) {
+            return;
+        }
+
+        const { frame, index } = frameQueue.shift()!;
+        activeCount++;
+
+        try {
+            const frameInfo = await saveFrameToOPFS(frame, file.opfsPath, index, {
+                format,
+                quality,
+            });
+            frames.push(frameInfo);
+            completedCount++;
+
+            if (onProgress) {
+                onProgress(completedCount, totalFrames);
+            }
+        } catch (err) {
+            if (!hasError) {
+                hasError = true;
+                rejectMain(err);
+            }
+        } finally {
+            frame.close();
+            activeCount--;
+
+            // Process next frame in queue
+            processNext();
+
+            // Check if all done
+            if (processingComplete && activeCount === 0 && frameQueue.length === 0 && !hasError) {
+                frames.sort((a, b) => a.index - b.index);
+                resolveMain({
+                    trackInfo: demuxResult.trackInfo,
+                    frames,
+                    format,
+                });
+            }
+        }
+    };
+
     return new Promise((resolve, reject) => {
+        resolveMain = resolve;
+        rejectMain = reject;
+
         const decoder = createVideoDecoder({
             config: demuxResult.config,
             onFrame: (frame, index) => {
-                // Start async save and track the promise
-                const savePromise = (async () => {
-                    try {
-                        const frameInfo = await saveFrameToOPFS(frame, file.opfsPath, index, {
-                            format,
-                            quality,
-                        });
-                        frames.push(frameInfo);
-
-                        // Close the frame to free memory
-                        frame.close();
-
-                        // Report progress
-                        if (onProgress) {
-                            onProgress(frames.length, totalFrames);
-                        }
-                    } catch (err) {
-                        reject(err);
-                    }
-                })();
-                savePromises.push(savePromise);
+                frameQueue.push({ frame, index });
+                processNext();
             },
-            onError: reject,
+            onError: (err) => {
+                if (!hasError) {
+                    hasError = true;
+                    reject(err);
+                }
+            },
         });
 
         // Decode all chunks
@@ -130,18 +173,25 @@ export async function extractAndStoreFrames(
             decoder.decode(chunk);
         }
 
-        // Flush decoder, then wait for all saves to complete
-        decoder.flush().then(async () => {
+        // Flush decoder
+        decoder.flush().then(() => {
             decoder.close();
-            // Wait for all frame saves to complete
-            await Promise.all(savePromises);
-            // Sort frames by index since they may complete out of order
-            frames.sort((a, b) => a.index - b.index);
-            resolve({
-                trackInfo: demuxResult.trackInfo,
-                frames,
-                format,
-            });
-        }).catch(reject);
+            processingComplete = true;
+
+            // If queue is empty and nothing active, resolve immediately
+            if (activeCount === 0 && frameQueue.length === 0 && !hasError) {
+                frames.sort((a, b) => a.index - b.index);
+                resolve({
+                    trackInfo: demuxResult.trackInfo,
+                    frames,
+                    format,
+                });
+            }
+        }).catch((err) => {
+            if (!hasError) {
+                hasError = true;
+                reject(err);
+            }
+        });
     });
 }

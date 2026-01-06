@@ -1,5 +1,9 @@
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { useEffect } from 'react';
+import { Handle, Position, useViewport, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import type { CustomNode, BaseNodeData } from '../../types/nodes';
+
+// Base handle size in pixels (constant screen size)
+const HANDLE_BASE_SIZE = 12;
 
 interface BaseNodeCustomProps {
   children?: React.ReactNode;
@@ -51,7 +55,6 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
     props: NodeProps<CustomNode<T>> & BaseNodeCustomProps
   ) {
   const {
-
     data,
     selected,
     children,
@@ -61,7 +64,14 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
     variant = 'default',
   } = props;
 
+  const { zoom } = useViewport();
+  const updateNodeInternals = useUpdateNodeInternals();
   const styles = variantStyles[variant];
+
+  // Update handle positions when zoom changes so edges connect correctly
+  useEffect(() => {
+    updateNodeInternals(props.id);
+  }, [zoom, props.id, updateNodeInternals]);
 
   const baseClasses = `
     bg-white rounded-lg shadow-md border-2 min-w-[200px] p-4
@@ -72,12 +82,17 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
 
   return (
     <div className={baseClasses}>
-      {/* Input handle on the left */}
+      {/* Input handle on top - positioned outside the node */}
       {showInputHandle && (
         <Handle
           type="target"
-          position={Position.Left}
-          className="w-3 h-3 bg-gray-400 hover:bg-gray-500"
+          position={Position.Top}
+          className="!bg-gray-400 hover:!bg-gray-500"
+          style={{
+            width: HANDLE_BASE_SIZE / zoom,
+            height: HANDLE_BASE_SIZE / zoom,
+            top: -(HANDLE_BASE_SIZE / zoom),
+          }}
         />
       )}
 
@@ -103,12 +118,17 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
         {children}
       </div>
 
-      {/* Output handle on the right */}
+      {/* Output handle on bottom - positioned outside the node */}
       {showOutputHandle && (
         <Handle
           type="source"
-          position={Position.Right}
-          className="w-3 h-3 bg-gray-400 hover:bg-gray-500"
+          position={Position.Bottom}
+          className="!bg-gray-400 hover:!bg-gray-500"
+          style={{
+            width: HANDLE_BASE_SIZE / zoom,
+            height: HANDLE_BASE_SIZE / zoom,
+            bottom: -(HANDLE_BASE_SIZE / zoom),
+          }}
         />
       )}
     </div>

@@ -10,13 +10,24 @@ export function FileNode(props: NodeProps<FileNode>) {
     const updateNode = useGraphStore((state) => state.updateNode);
 
     const handleExtracted = useCallback((info: ExtractedFramesInfo) => {
-        updateNode(props.id, {
+        updateNode(props.id, (node) => ({
             data: {
-                ...props.data,
+                ...node.data,
                 extractedFrames: info,
             },
-        });
-    }, [props.id, props.data, updateNode]);
+        }));
+    }, [props.id, updateNode]);
+
+    const handleFrameChange = useCallback((frameIndex: number) => {
+        updateNode(props.id, (node) => ({
+            data: {
+                ...node.data,
+                extractedFrames: node.data.extractedFrames
+                    ? { ...node.data.extractedFrames, currentFrameIndex: frameIndex }
+                    : undefined,
+            },
+        }));
+    }, [props.id, updateNode]);
 
     const fileIcon = (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -54,6 +65,7 @@ export function FileNode(props: NodeProps<FileNode>) {
                     file={props.data.file}
                     extractedFrames={props.data.extractedFrames}
                     onExtracted={handleExtracted}
+                    onFrameChange={handleFrameChange}
                 />
             </div>
         </BaseNode>

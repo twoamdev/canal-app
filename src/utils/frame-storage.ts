@@ -40,6 +40,11 @@ export async function videoFrameToBlob(
     format: FrameFormat = 'webp',
     quality: number = 0.9
 ): Promise<Blob> {
+    // Validate frame before processing
+    if (!frame || frame.displayWidth === 0 || frame.displayHeight === 0) {
+        throw new Error(`Invalid VideoFrame: dimensions ${frame?.displayWidth}x${frame?.displayHeight}`);
+    }
+
     // Create an OffscreenCanvas to draw the frame
     const canvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
     const ctx = canvas.getContext('2d');

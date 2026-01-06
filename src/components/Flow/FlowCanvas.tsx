@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback } from 'react'
 import {
     ReactFlow,
     addEdge,
@@ -8,8 +8,30 @@ import {
     Controls,
 } from '@xyflow/react'
 import { useDragAndDropFiles } from '../../hooks/useDragAndDropFiles';
+import { useCanvasHotkeys } from '../../hooks/useCanvasHotkeys';
 import { useGraphStore } from '../../stores/graphStore';
 import { FileNode , BaseNode} from '../Nodes';
+import { ZoomInvariantEdge, ZoomInvariantConnectionLine } from '../Edges';
+
+// Component to initialize hotkeys inside ReactFlow context
+function CanvasHotkeys() {
+    useCanvasHotkeys();
+    return null;
+}
+
+// Define outside component to prevent recreation on each render
+const nodeTypes = {
+    file: FileNode,
+    default: BaseNode,
+};
+
+const edgeTypes = {
+    zoomInvariant: ZoomInvariantEdge,
+};
+
+const defaultEdgeOptions = {
+    type: 'zoomInvariant',
+};
 
 export function FlowCanvas() {
     // Get state and actions from Zustand store
@@ -20,15 +42,6 @@ export function FlowCanvas() {
     const onEdgesChange = useGraphStore((state) => state.onEdgesChange);
     
     const { handleFileDrop, handleFileDragOver } = useDragAndDropFiles();
-
-    // Register custom node types
-    const nodeTypes = useMemo(
-        () => ({
-            file: FileNode,
-            default: BaseNode, // Use BaseNode as default for now
-        }),
-        []
-    );
 
     const onConnect: OnConnect = useCallback(
         (params) => {
@@ -59,6 +72,9 @@ export function FlowCanvas() {
                 nodes={nodes}
                 edges={edges}
                 nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                defaultEdgeOptions={defaultEdgeOptions}
+                connectionLineComponent={ZoomInvariantConnectionLine}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
@@ -67,7 +83,10 @@ export function FlowCanvas() {
                 panOnDrag={[1, 2]}
                 selectionMode={SelectionMode.Partial}
                 fitView
+                minZoom={0.1}
+                maxZoom={4}
             >
+                <CanvasHotkeys />
                 <Controls />
                 <Background />
             </ReactFlow>

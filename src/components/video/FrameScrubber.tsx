@@ -10,10 +10,12 @@ interface FrameScrubberProps {
     file: OPFSFileMetadata;
     extractedFrames?: ExtractedFramesInfo;
     onExtracted: (info: ExtractedFramesInfo) => void;
+    onFrameChange: (frameIndex: number) => void;
 }
 
-export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted }: FrameScrubberProps) {
+export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted, onFrameChange }: FrameScrubberProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const previewCanvasRef = useRef<HTMLCanvasElement>(null);
     const sliderRef = useRef<HTMLInputElement>(null);
     const frameCountRef = useRef<HTMLSpanElement>(null);
     const progressTextRef = useRef<HTMLSpanElement>(null);
@@ -29,19 +31,25 @@ export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted }: Fr
 
     // Refs for heavy data (no re-renders when these change)
     const frameCacheRef = useRef<Map<number, ImageBitmap>>(new Map());
-    const currentFrameRef = useRef(0);
+    const cacheOrderRef = useRef<number[]>([]); // LRU order tracking
+    const currentFrameRef = useRef(extractedFrames?.currentFrameIndex ?? 0);
     const playbackRef = useRef<number | null>(null);
     const lastFrameTimeRef = useRef(0);
+    const previewBitmapRef = useRef<ImageBitmap | null>(null);
+
+    // Max frames to keep in memory (adjust based on frame size)
+    const MAX_CACHE_SIZE = 150;
 
     const isActive = useFrameStore((state) => state.activeNodeId === nodeId);
     const setActiveNode = useFrameStore((state) => state.setActiveNode);
 
-    // Clear cache when deactivated
+    // Clear cache when deactivated (but keep preview)
     useEffect(() => {
         if (!isActive) {
             // Close all cached ImageBitmaps to free memory
             frameCacheRef.current.forEach((bitmap) => bitmap.close());
             frameCacheRef.current.clear();
+            cacheOrderRef.current = [];
         }
     }, [isActive]);
 
@@ -50,8 +58,70 @@ export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted }: Fr
         return () => {
             frameCacheRef.current.forEach((bitmap) => bitmap.close());
             frameCacheRef.current.clear();
+            cacheOrderRef.current = [];
+            if (previewBitmapRef.current) {
+                previewBitmapRef.current.close();
+                previewBitmapRef.current = null;
+            }
         };
     }, []);
+
+    // Load and draw preview when inactive (shows last viewed frame)
+    useEffect(() => {
+        if (isActive || !extractedFrames) return;
+
+        const canvas = previewCanvasRef.current;
+        if (!canvas) return;
+
+        // Set canvas dimensions
+        canvas.width = extractedFrames.width;
+        canvas.height = extractedFrames.height;
+
+        const frameIndex = extractedFrames.currentFrameIndex;
+        const framePath = getFramePath(file.opfsPath, frameIndex, extractedFrames.format as FrameFormat);
+
+        loadFrameFromOPFS(framePath)
+            .then((bitmap) => {
+                // Close old preview bitmap
+                if (previewBitmapRef.current) {
+                    previewBitmapRef.current.close();
+                }
+                previewBitmapRef.current = bitmap;
+
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+                }
+            })
+            .catch((err) => {
+                console.error('Failed to load preview frame:', err);
+            });
+    }, [isActive, extractedFrames, file.opfsPath]);
+
+    // Add frame to cache with LRU eviction
+    const addToCache = useCallback((frameIndex: number, bitmap: ImageBitmap) => {
+        const cache = frameCacheRef.current;
+        const order = cacheOrderRef.current;
+
+        // If already in cache, move to end (most recently used)
+        const existingIdx = order.indexOf(frameIndex);
+        if (existingIdx !== -1) {
+            order.splice(existingIdx, 1);
+        }
+        order.push(frameIndex);
+
+        cache.set(frameIndex, bitmap);
+
+        // Evict oldest entries if over limit
+        while (order.length > MAX_CACHE_SIZE) {
+            const oldestFrame = order.shift()!;
+            const oldBitmap = cache.get(oldestFrame);
+            if (oldBitmap) {
+                oldBitmap.close();
+                cache.delete(oldestFrame);
+            }
+        }
+    }, [MAX_CACHE_SIZE]);
 
     // Draw a frame to canvas
     const drawFrame = useCallback(async (frameIndex: number) => {
@@ -68,7 +138,7 @@ export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted }: Fr
             const framePath = getFramePath(file.opfsPath, frameIndex, extractedFrames.format as FrameFormat);
             try {
                 bitmap = await loadFrameFromOPFS(framePath);
-                frameCacheRef.current.set(frameIndex, bitmap);
+                addToCache(frameIndex, bitmap);
             } catch (error) {
                 console.error('Failed to load frame:', frameIndex, error);
                 return;
@@ -81,14 +151,15 @@ export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted }: Fr
         if (frameCountRef.current) {
             frameCountRef.current.textContent = `${frameIndex + 1}/${extractedFrames.frameCount}`;
         }
-    }, [file.opfsPath, extractedFrames]);
+    }, [file.opfsPath, extractedFrames, addToCache]);
 
     // Handle slider scrubbing
     const handleScrub = useCallback((e: React.FormEvent<HTMLInputElement>) => {
         const frameIndex = Number((e.target as HTMLInputElement).value);
         currentFrameRef.current = frameIndex;
         drawFrame(frameIndex);
-    }, [drawFrame]);
+        onFrameChange(frameIndex);
+    }, [drawFrame, onFrameChange]);
 
     // Playback effect
     useEffect(() => {
@@ -147,16 +218,28 @@ export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted }: Fr
         };
     }, [isPlaying, isLooping, extractedFrames, isActive, drawFrame]);
 
-    // Stop playback when deactivated
+    // Track previous active state to detect deactivation
+    const wasActiveRef = useRef(isActive);
+
+    // Stop playback and save frame when deactivated
     useEffect(() => {
         if (!isActive && isPlaying) {
             setIsPlaying(false);
         }
-    }, [isActive, isPlaying]);
+        // Save current frame only when transitioning from active to inactive
+        if (wasActiveRef.current && !isActive) {
+            onFrameChange(currentFrameRef.current);
+        }
+        wasActiveRef.current = isActive;
+    }, [isActive, isPlaying, onFrameChange]);
 
     const togglePlayback = useCallback(() => {
+        // Save frame when pausing (check current state before toggling)
+        if (isPlaying) {
+            onFrameChange(currentFrameRef.current);
+        }
         setIsPlaying((prev) => !prev);
-    }, []);
+    }, [isPlaying, onFrameChange]);
 
     const toggleLoop = useCallback(() => {
         setIsLooping((prev) => !prev);
@@ -191,6 +274,7 @@ export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted }: Fr
                 width: result.trackInfo.width,
                 height: result.trackInfo.height,
                 duration: result.trackInfo.duration,
+                currentFrameIndex: 0,
             });
 
             setIsExtracting(false);
@@ -206,12 +290,13 @@ export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted }: Fr
         setActiveNode(nodeId);
     }, [nodeId, setActiveNode]);
 
-    // Setup canvas and draw first frame when becoming active
+    // Setup canvas and draw current frame when becoming active
     useEffect(() => {
         if (!isActive || !extractedFrames) return;
 
         const canvas = canvasRef.current;
         const slider = sliderRef.current;
+        const frameIndex = extractedFrames.currentFrameIndex;
 
         if (canvas) {
             canvas.width = extractedFrames.width;
@@ -220,11 +305,12 @@ export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted }: Fr
 
         if (slider) {
             slider.max = String(extractedFrames.frameCount - 1);
-            slider.value = '0';
+            slider.value = String(frameIndex);
         }
 
-        // Draw first frame
-        drawFrame(0);
+        // Update ref and draw the current frame
+        currentFrameRef.current = frameIndex;
+        drawFrame(frameIndex);
     }, [isActive, extractedFrames, drawFrame]);
 
     // Not extracted yet - show extract button or progress
@@ -256,15 +342,29 @@ export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted }: Fr
         );
     }
 
-    // Extracted but not active - show thumbnail/activate button
+    // Extracted but not active - show preview with click to activate
     if (!isActive) {
         return (
-            <button
-                onClick={handleActivate}
-                className="w-full bg-gray-700 text-white px-2 py-1 rounded-md hover:bg-gray-600 text-xs"
-            >
-                View Frames ({extractedFrames?.frameCount || 0})
-            </button>
+            <div className="space-y-2">
+                <div
+                    className="relative cursor-pointer group"
+                    onClick={handleActivate}
+                >
+                    <canvas
+                        ref={previewCanvasRef}
+                        className="bg-black rounded w-full"
+                        style={{ height: 'auto' }}
+                    />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+                        <span className="opacity-0 group-hover:opacity-100 text-white text-xs bg-black/70 px-2 py-1 rounded transition-opacity">
+                            Click to edit
+                        </span>
+                    </div>
+                    <span className="absolute bottom-1 right-1 bg-black/70 text-white text-xs px-1 rounded">
+                        {(extractedFrames?.currentFrameIndex ?? 0) + 1}/{extractedFrames?.frameCount || 0}
+                    </span>
+                </div>
+            </div>
         );
     }
 

@@ -46,7 +46,7 @@ interface GraphState {
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   addNode: (node: GraphNode) => void;
-  updateNode: (id: string, updates: Partial<GraphNode>) => void;
+  updateNode: (id: string, updates: Partial<GraphNode> | ((node: GraphNode) => Partial<GraphNode>)) => void;
   removeNode: (id: string) => void;
   addEdge: (edge: Edge) => void;
   removeEdge: (id: string) => void;
@@ -103,9 +103,11 @@ export const useGraphStore = create<GraphState>()(
 
       updateNode: (id, updates) =>
         set((state) => ({
-          nodes: state.nodes.map((node) =>
-            node.id === id ? { ...node, ...updates } : node
-          ),
+          nodes: state.nodes.map((node) => {
+            if (node.id !== id) return node;
+            const resolvedUpdates = typeof updates === 'function' ? updates(node) : updates;
+            return { ...node, ...resolvedUpdates };
+          }),
         })),
 
       removeNode: (id) =>
