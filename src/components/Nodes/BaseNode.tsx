@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import { Handle, Position, useViewport, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import type { CustomNode, BaseNodeData } from '../../types/nodes';
+import { Card } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
 // Base handle size in pixels (constant screen size)
 const HANDLE_BASE_SIZE = 12;
@@ -10,44 +12,39 @@ interface BaseNodeCustomProps {
   icon?: React.ReactNode;
   showInputHandle?: boolean;
   showOutputHandle?: boolean;
-  variant?: 'default' | 'blue' | 'green' | 'purple' | 'red';
+  variant?: 'default' | 'primary' | 'success' | 'warning' | 'destructive';
 }
 
 const variantStyles = {
   default: {
-    border: 'border-gray-300',
-    borderSelected: 'border-gray-500',
-    borderHover: 'hover:border-gray-400',
-    iconBg: 'bg-gray-100',
-    iconText: 'text-gray-600',
+    ring: 'ring-border',
+    ringSelected: 'ring-foreground',
+    iconBg: 'bg-muted',
+    iconText: 'text-muted-foreground',
   },
-  blue: {
-    border: 'border-blue-300',
-    borderSelected: 'border-blue-500',
-    borderHover: 'hover:border-blue-400',
-    iconBg: 'bg-blue-100',
-    iconText: 'text-blue-600',
+  primary: {
+    ring: 'ring-primary/30',
+    ringSelected: 'ring-primary',
+    iconBg: 'bg-primary/10',
+    iconText: 'text-primary',
   },
-  green: {
-    border: 'border-green-300',
-    borderSelected: 'border-green-500',
-    borderHover: 'hover:border-green-400',
-    iconBg: 'bg-green-100',
+  success: {
+    ring: 'ring-green-500/30',
+    ringSelected: 'ring-green-500',
+    iconBg: 'bg-green-500/10',
     iconText: 'text-green-600',
   },
-  purple: {
-    border: 'border-purple-300',
-    borderSelected: 'border-purple-500',
-    borderHover: 'hover:border-purple-400',
-    iconBg: 'bg-purple-100',
-    iconText: 'text-purple-600',
+  warning: {
+    ring: 'ring-yellow-500/30',
+    ringSelected: 'ring-yellow-500',
+    iconBg: 'bg-yellow-500/10',
+    iconText: 'text-yellow-600',
   },
-  red: {
-    border: 'border-red-300',
-    borderSelected: 'border-red-500',
-    borderHover: 'hover:border-red-400',
-    iconBg: 'bg-red-100',
-    iconText: 'text-red-600',
+  destructive: {
+    ring: 'ring-destructive/30',
+    ringSelected: 'ring-destructive',
+    iconBg: 'bg-destructive/10',
+    iconText: 'text-destructive',
   },
 };
 
@@ -73,21 +70,20 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
     updateNodeInternals(props.id);
   }, [zoom, props.id, updateNodeInternals]);
 
-  const baseClasses = `
-    bg-white rounded-lg shadow-md border-2 min-w-[200px] p-4
-    transition-all duration-200
-    ${selected ? styles.borderSelected : styles.border}
-    hover:shadow-lg ${styles.borderHover}
-  `;
-
   return (
-    <div className={baseClasses}>
+    <Card
+      className={cn(
+        'min-w-[200px] p-4 transition-all duration-200 ring-2',
+        selected ? styles.ringSelected : styles.ring,
+        'hover:shadow-lg'
+      )}
+    >
       {/* Input handle on top - positioned outside the node */}
       {showInputHandle && (
         <Handle
           type="target"
           position={Position.Top}
-          className="!bg-gray-400 hover:!bg-gray-500"
+          className="!bg-muted-foreground hover:!bg-foreground transition-colors"
           style={{
             width: HANDLE_BASE_SIZE / zoom,
             height: HANDLE_BASE_SIZE / zoom,
@@ -101,14 +97,14 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
         {/* Icon and label header */}
         <div className="flex items-center gap-2">
           {icon && (
-            <div className={`w-8 h-8 ${styles.iconBg} rounded flex items-center justify-center`}>
+            <div className={cn('w-8 h-8 rounded flex items-center justify-center', styles.iconBg)}>
               <div className={styles.iconText}>
                 {icon}
               </div>
             </div>
           )}
           <div className="flex-1 min-w-0">
-            <p className="font-semibold text-sm text-gray-800 truncate">
+            <p className="font-semibold text-sm text-foreground truncate">
               {data.label}
             </p>
           </div>
@@ -123,7 +119,7 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
         <Handle
           type="source"
           position={Position.Bottom}
-          className="!bg-gray-400 hover:!bg-gray-500"
+          className="!bg-muted-foreground hover:!bg-foreground transition-colors"
           style={{
             width: HANDLE_BASE_SIZE / zoom,
             height: HANDLE_BASE_SIZE / zoom,
@@ -131,6 +127,6 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
           }}
         />
       )}
-    </div>
+    </Card>
   );
 }

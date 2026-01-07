@@ -4,6 +4,10 @@ import type { ExtractedFramesInfo } from '../../types/nodes';
 import { extractAndStoreFrames } from '../../utils/video-pipeline';
 import { loadFrameFromOPFS, getFramePath, type FrameFormat } from '../../utils/frame-storage';
 import { useFrameStore } from '../../stores/frameStore';
+import { Button } from '@/components/ui/button';
+import { Slider } from '@/components/ui/slider';
+import { Progress } from '@/components/ui/progress';
+import { Play, Pause, Repeat } from 'lucide-react';
 
 interface FrameScrubberProps {
     nodeId: string;
@@ -16,18 +20,20 @@ interface FrameScrubberProps {
 export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted, onFrameChange }: FrameScrubberProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const previewCanvasRef = useRef<HTMLCanvasElement>(null);
-    const sliderRef = useRef<HTMLInputElement>(null);
     const frameCountRef = useRef<HTMLSpanElement>(null);
-    const progressTextRef = useRef<HTMLSpanElement>(null);
-    const progressBarRef = useRef<HTMLDivElement>(null);
 
     // Minimal state for re-renders (only for UI transitions)
     const [isExtracting, setIsExtracting] = useState(false);
+    const [extractProgress, setExtractProgress] = useState(0);
     const [isPlaying, setIsPlaying] = useState(false);
     const [isLooping, setIsLooping] = useState(false);
+    const [sliderValue, setSliderValue] = useState([extractedFrames?.currentFrameIndex ?? 0]);
 
     // Use persisted extractedFrames to determine if already extracted
     const isExtracted = !!extractedFrames;
+
+    // Check if file is a video type
+    const isVideoFile = file.type.startsWith('video/');
 
     // Refs for heavy data (no re-renders when these change)
     const frameCacheRef = useRef<Map<number, ImageBitmap>>(new Map());
@@ -154,9 +160,10 @@ export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted, onFr
     }, [file.opfsPath, extractedFrames, addToCache]);
 
     // Handle slider scrubbing
-    const handleScrub = useCallback((e: React.FormEvent<HTMLInputElement>) => {
-        const frameIndex = Number((e.target as HTMLInputElement).value);
+    const handleScrub = useCallback((value: number[]) => {
+        const frameIndex = value[0];
         currentFrameRef.current = frameIndex;
+        setSliderValue(value);
         drawFrame(frameIndex);
         onFrameChange(frameIndex);
     }, [drawFrame, onFrameChange]);
@@ -196,12 +203,8 @@ export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted, onFr
                 }
 
                 currentFrameRef.current = nextFrame;
+                setSliderValue([nextFrame]);
                 drawFrame(nextFrame);
-
-                // Update slider position
-                if (sliderRef.current) {
-                    sliderRef.current.value = String(nextFrame);
-                }
             }
 
             playbackRef.current = requestAnimationFrame(playFrame);
@@ -258,12 +261,7 @@ export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted, onFr
                 format: 'webp',
                 quality: 0.9,
                 onProgress: (current, total) => {
-                    if (progressTextRef.current) {
-                        progressTextRef.current.textContent = `${current}/${total}`;
-                    }
-                    if (progressBarRef.current) {
-                        progressBarRef.current.style.width = `${(current / total) * 100}%`;
-                    }
+                    setExtractProgress(Math.round((current / total) * 100));
                 },
             });
 
@@ -285,6 +283,15 @@ export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted, onFr
         }
     }, [file, nodeId, setActiveNode, isExtracting, onExtracted]);
 
+    // Auto-start extraction for video files on mount
+    const hasStartedExtractionRef = useRef(false);
+    useEffect(() => {
+        if (isVideoFile && !isExtracted && !isExtracting && !hasStartedExtractionRef.current) {
+            hasStartedExtractionRef.current = true;
+            handleExtract();
+        }
+    }, [isVideoFile, isExtracted, isExtracting, handleExtract]);
+
     // Activate this node for scrubbing (if already extracted)
     const handleActivate = useCallback(() => {
         setActiveNode(nodeId);
@@ -295,7 +302,6 @@ export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted, onFr
         if (!isActive || !extractedFrames) return;
 
         const canvas = canvasRef.current;
-        const slider = sliderRef.current;
         const frameIndex = extractedFrames.currentFrameIndex;
 
         if (canvas) {
@@ -303,41 +309,30 @@ export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted, onFr
             canvas.height = extractedFrames.height;
         }
 
-        if (slider) {
-            slider.max = String(extractedFrames.frameCount - 1);
-            slider.value = String(frameIndex);
-        }
-
-        // Update ref and draw the current frame
+        // Update slider and ref, draw the current frame
+        setSliderValue([frameIndex]);
         currentFrameRef.current = frameIndex;
         drawFrame(frameIndex);
     }, [isActive, extractedFrames, drawFrame]);
 
-    // Not extracted yet - show extract button or progress
+    // Not extracted yet - show extraction progress (auto-started for video files)
     if (!isExtracted) {
+        // Non-video files don't support frame extraction
+        if (!isVideoFile) {
+            return (
+                <div className="text-center text-xs text-muted-foreground py-2">
+                    Not a video file
+                </div>
+            );
+        }
+
+        // Video file - show extraction progress (auto-started)
         return (
             <div className="space-y-2">
-                {isExtracting ? (
-                    <div className="space-y-1">
-                        <div className="text-center text-xs">
-                            Extracting... <span ref={progressTextRef}>0/0</span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                            <div
-                                ref={progressBarRef}
-                                className="bg-blue-500 h-2 rounded-full transition-all"
-                                style={{ width: '0%' }}
-                            />
-                        </div>
-                    </div>
-                ) : (
-                    <button
-                        onClick={handleExtract}
-                        className="w-full bg-blue-500 text-white px-2 py-1 rounded-md hover:bg-blue-600 active:bg-blue-700 text-xs"
-                    >
-                        Extract Frames
-                    </button>
-                )}
+                <div className="text-center text-xs text-muted-foreground">
+                    {isExtracting ? `Extracting... ${extractProgress}%` : 'Starting extraction...'}
+                </div>
+                <Progress value={extractProgress} className="h-2" />
             </div>
         );
     }
@@ -382,55 +377,40 @@ export function FrameScrubber({ nodeId, file, extractedFrames, onExtracted, onFr
                     className="absolute bottom-1 right-1 bg-black/70 text-white text-xs px-1 rounded"
                 />
             </div>
-            <input
-                ref={sliderRef}
-                type="range"
+            <Slider
+                value={sliderValue}
+                onValueChange={handleScrub}
                 min={0}
-                max={0}
-                defaultValue={0}
-                onInput={handleScrub}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                max={extractedFrames ? extractedFrames.frameCount - 1 : 0}
+                step={1}
+                className="w-full"
             />
             <div className="flex items-center gap-2">
-                <button
+                <Button
                     onClick={togglePlayback}
-                    className="flex-1 bg-blue-500 text-white px-2 py-1 rounded-md hover:bg-blue-600 active:bg-blue-700 text-xs flex items-center justify-center gap-1"
+                    size="sm"
+                    className="flex-1"
                 >
                     {isPlaying ? (
                         <>
-                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
-                                <rect x="6" y="4" width="4" height="16" />
-                                <rect x="14" y="4" width="4" height="16" />
-                            </svg>
+                            <Pause className="w-3 h-3 mr-1" />
                             Pause
                         </>
                     ) : (
                         <>
-                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M8 5v14l11-7z" />
-                            </svg>
+                            <Play className="w-3 h-3 mr-1" />
                             Play
                         </>
                     )}
-                </button>
-                <button
+                </Button>
+                <Button
                     onClick={toggleLoop}
-                    className={`px-2 py-1 rounded-md text-xs flex items-center gap-1 ${
-                        isLooping
-                            ? 'bg-green-500 text-white hover:bg-green-600'
-                            : 'bg-gray-300 text-gray-700 hover:bg-gray-400'
-                    }`}
+                    size="sm"
+                    variant={isLooping ? 'default' : 'outline'}
                     title={isLooping ? 'Loop enabled' : 'Loop disabled'}
                 >
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                        />
-                    </svg>
-                </button>
+                    <Repeat className="w-3 h-3" />
+                </Button>
             </div>
         </div>
     );
