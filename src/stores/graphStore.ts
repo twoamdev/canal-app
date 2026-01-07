@@ -40,13 +40,14 @@ async function cleanupNodeFile(node: GraphNode): Promise<void> {
 interface GraphState {
   nodes: GraphNode[];
   edges: Edge[];
-  
+
   setNodes: (nodes: GraphNode[]) => void;
   setEdges: (edges: Edge[]) => void;
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   addNode: (node: GraphNode) => void;
   updateNode: (id: string, updates: Partial<GraphNode> | ((node: GraphNode) => Partial<GraphNode>)) => void;
+  replaceNodeType: (id: string, newType: string, newData: Record<string, unknown>) => void;
   removeNode: (id: string) => void;
   addEdge: (edge: Edge) => void;
   removeEdge: (id: string) => void;
@@ -107,6 +108,20 @@ export const useGraphStore = create<GraphState>()(
             if (node.id !== id) return node;
             const resolvedUpdates = typeof updates === 'function' ? updates(node) : updates;
             return { ...node, ...resolvedUpdates };
+          }),
+        })),
+
+      replaceNodeType: (id, newType, newData) =>
+        set((state) => ({
+          nodes: state.nodes.map((node) => {
+            if (node.id !== id) return node;
+            // Preserve position, selected state, and other ReactFlow properties
+            // but replace type and data
+            return {
+              ...node,
+              type: newType,
+              data: newData,
+            } as GraphNode;
           }),
         })),
 

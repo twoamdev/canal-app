@@ -1,5 +1,6 @@
 import { useEffect, useCallback } from 'react';
 import { useReactFlow } from '@xyflow/react';
+import { useCommandMenuStore } from '../stores/commandMenuStore';
 
 interface HotkeyAction {
   key: string;
@@ -12,9 +13,15 @@ interface HotkeyAction {
 
 export function useCanvasHotkeys() {
   const { zoomIn, zoomOut, fitView, setViewport, getViewport } = useReactFlow();
+  const openCommandMenu = useCommandMenuStore((state) => state.open);
 
   // Define all hotkey actions
   const getHotkeys = useCallback((): HotkeyAction[] => [
+    {
+      key: 'Tab',
+      action: () => openCommandMenu(),
+      description: 'Open node command menu',
+    },
     {
       key: '=', // + key (without shift)
       action: () => zoomIn({ duration: 200 }),
@@ -47,7 +54,7 @@ export function useCanvasHotkeys() {
       description: 'Reset zoom to 100%',
     },
     // Add more hotkeys here as needed
-  ], [zoomIn, zoomOut, fitView, setViewport, getViewport]);
+  ], [zoomIn, zoomOut, fitView, setViewport, getViewport, openCommandMenu]);
 
   useEffect(() => {
     const hotkeys = getHotkeys();

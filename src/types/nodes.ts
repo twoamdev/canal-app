@@ -23,19 +23,33 @@ export interface ExtractedFramesInfo {
 }
 
 /**
- * File node data - extends base data
- * This is still just the DATA part
+ * File node data - base for all file-based nodes
+ * File is optional to support empty placeholder nodes
  */
 export interface FileNodeData extends BaseNodeData {
-  file: OPFSFileMetadata;
+  file?: OPFSFileMetadata;
+}
+
+/**
+ * Video node data - extends file node with video-specific features
+ */
+export interface VideoNodeData extends FileNodeData {
   extractedFrames?: ExtractedFramesInfo;
 }
 
 /**
- * Type alias for a file node using ReactFlow's Node type
- * This is the FULL node structure (id, position, data, etc.)
+ * Image node data - extends file node with image-specific features
  */
-export type FileNode = ReactFlowNode<FileNodeData>;
+export interface ImageNodeData extends FileNodeData {
+  // Future: dimensions, thumbnail, filters applied, etc.
+}
+
+/**
+ * Node type definitions
+ */
+export type FileNode = ReactFlowNode<FileNodeData, 'file'>;
+export type VideoNode = ReactFlowNode<VideoNodeData, 'video'>;
+export type ImageNode = ReactFlowNode<ImageNodeData, 'image'>;
 
 /**
  * Type alias for any node with base data
@@ -44,12 +58,66 @@ export type CustomNode<T extends BaseNodeData = BaseNodeData> = ReactFlowNode<T>
 
 /**
  * Union type of all possible node types in the graph
- * Add new node types here as you create them
- * 
- * Example for future:
- * export type GraphNode = FileNode | EffectNode | TransformNode | OutputNode;
  */
-export type GraphNode = FileNode;
+export type GraphNode = FileNode | VideoNode | ImageNode;
 
 // Helper type to extract node data type from a node
 export type NodeData<T extends GraphNode> = T extends ReactFlowNode<infer D> ? D : never;
+
+/**
+ * Node registry - defines available node types for the command menu
+ */
+export interface NodeTypeDefinition {
+  type: string;
+  label: string;
+  description: string;
+  icon: string; // Lucide icon name
+  category: 'input' | 'transform' | 'output' | 'utility';
+  acceptsMimeTypes?: string[]; // For file-based nodes
+}
+
+export const NODE_REGISTRY: NodeTypeDefinition[] = [
+  {
+    type: 'video',
+    label: 'Video',
+    description: 'Import and process video files',
+    icon: 'FileVideo',
+    category: 'input',
+    acceptsMimeTypes: ['video/*'],
+  },
+  {
+    type: 'image',
+    label: 'Image',
+    description: 'Import PNG or JPG images',
+    icon: 'Image',
+    category: 'input',
+    acceptsMimeTypes: ['image/png', 'image/jpeg'],
+  },
+  {
+    type: 'file',
+    label: 'File',
+    description: 'Generic file import',
+    icon: 'File',
+    category: 'input',
+    acceptsMimeTypes: ['*/*'],
+  },
+];
+
+/**
+ * File-based node types
+ */
+export type FileBasedNodeType = 'file' | 'video' | 'image';
+
+/**
+ * Supported image MIME types for ImageNode
+ */
+const SUPPORTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg'];
+
+/**
+ * Get the appropriate node type for a given MIME type
+ */
+export function getNodeTypeForMimeType(mimeType: string): FileBasedNodeType {
+  if (mimeType.startsWith('video/')) return 'video';
+  if (SUPPORTED_IMAGE_TYPES.includes(mimeType)) return 'image';
+  return 'file';
+}
