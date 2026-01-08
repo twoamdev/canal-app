@@ -107,7 +107,7 @@ export const useGraphStore = create<GraphState>()(
           nodes: state.nodes.map((node) => {
             if (node.id !== id) return node;
             const resolvedUpdates = typeof updates === 'function' ? updates(node) : updates;
-            return { ...node, ...resolvedUpdates };
+            return { ...node, ...resolvedUpdates } as GraphNode;
           }),
         })),
 

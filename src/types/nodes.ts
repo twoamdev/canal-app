@@ -23,6 +23,49 @@ export interface ExtractedFramesInfo {
 }
 
 /**
+ * Effect configuration for GPU processing (used internally)
+ */
+export interface EffectConfig {
+  id: string;
+  effectName: string;
+  parameters: Record<string, number | number[] | boolean>;
+  enabled: boolean;
+}
+
+// =============================================================================
+// Effect Node Data Types
+// =============================================================================
+
+/**
+ * Base data for all effect nodes
+ */
+export interface EffectNodeData extends BaseNodeData {
+  // Parameters specific to the effect (e.g., { radius: 10 } for blur)
+  parameters: Record<string, number | number[] | boolean>;
+}
+
+/**
+ * Blur node data
+ */
+export interface BlurNodeData extends EffectNodeData {
+  parameters: {
+    radius: number;
+  };
+}
+
+/**
+ * Color adjustment node data
+ */
+export interface ColorAdjustNodeData extends EffectNodeData {
+  parameters: {
+    brightness: number;
+    contrast: number;
+    saturation: number;
+    exposure: number;
+  };
+}
+
+/**
  * File node data - base for all file-based nodes
  * File is optional to support empty placeholder nodes
  */
@@ -50,6 +93,8 @@ export interface ImageNodeData extends FileNodeData {
 export type FileNode = ReactFlowNode<FileNodeData, 'file'>;
 export type VideoNode = ReactFlowNode<VideoNodeData, 'video'>;
 export type ImageNode = ReactFlowNode<ImageNodeData, 'image'>;
+export type BlurNode = ReactFlowNode<BlurNodeData, 'blur'>;
+export type ColorAdjustNode = ReactFlowNode<ColorAdjustNodeData, 'colorAdjust'>;
 
 /**
  * Type alias for any node with base data
@@ -59,7 +104,7 @@ export type CustomNode<T extends BaseNodeData = BaseNodeData> = ReactFlowNode<T>
 /**
  * Union type of all possible node types in the graph
  */
-export type GraphNode = FileNode | VideoNode | ImageNode;
+export type GraphNode = FileNode | VideoNode | ImageNode | BlurNode | ColorAdjustNode;
 
 // Helper type to extract node data type from a node
 export type NodeData<T extends GraphNode> = T extends ReactFlowNode<infer D> ? D : never;
@@ -72,11 +117,13 @@ export interface NodeTypeDefinition {
   label: string;
   description: string;
   icon: string; // Lucide icon name
-  category: 'input' | 'transform' | 'output' | 'utility';
+  category: 'input' | 'effect' | 'transform' | 'output' | 'utility';
   acceptsMimeTypes?: string[]; // For file-based nodes
+  defaultData?: Record<string, unknown>; // Default data for new nodes
 }
 
 export const NODE_REGISTRY: NodeTypeDefinition[] = [
+  // Input nodes
   {
     type: 'video',
     label: 'Video',
@@ -100,6 +147,34 @@ export const NODE_REGISTRY: NodeTypeDefinition[] = [
     icon: 'File',
     category: 'input',
     acceptsMimeTypes: ['*/*'],
+  },
+  // Effect nodes
+  {
+    type: 'blur',
+    label: 'Blur',
+    description: 'Gaussian blur effect',
+    icon: 'CircleDot',
+    category: 'effect',
+    defaultData: {
+      label: 'Blur',
+      parameters: { radius: 10 },
+    },
+  },
+  {
+    type: 'colorAdjust',
+    label: 'Color Adjust',
+    description: 'Brightness, contrast, saturation',
+    icon: 'Palette',
+    category: 'effect',
+    defaultData: {
+      label: 'Color Adjust',
+      parameters: {
+        brightness: 0,
+        contrast: 1,
+        saturation: 1,
+        exposure: 0,
+      },
+    },
   },
 ];
 

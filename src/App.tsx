@@ -1,12 +1,18 @@
 import './App.css'
 import { ReactFlowProvider } from '@xyflow/react';
 import { FlowCanvas } from './components/Flow';
+import { TimelineScrubber } from './components/Timeline/TimelineScrubber';
 
 
 export default function App() {
   return (
     <ReactFlowProvider>
-      <FlowCanvas />
+      <div className="flex flex-col h-screen w-screen overflow-hidden">
+        <div className="flex-1 relative">
+          <FlowCanvas />
+        </div>
+        <TimelineScrubber />
+      </div>
     </ReactFlowProvider>
   );
 }

@@ -12,6 +12,7 @@ export function FileNode(props: NodeProps<FileNode>) {
             {...props}
             icon={<File className="w-5 h-5" />}
             variant="default"
+            showInputHandle={false}
         >
             {hasFile ? (
                 <div className="text-xs text-muted-foreground space-y-1">

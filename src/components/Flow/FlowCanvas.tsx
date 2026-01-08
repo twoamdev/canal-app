@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import {
     ReactFlow,
     addEdge,
@@ -13,9 +13,10 @@ import { useDragAndDropFiles } from '../../hooks/useDragAndDropFiles';
 import { useCanvasHotkeys } from '../../hooks/useCanvasHotkeys';
 import { useGraphStore } from '../../stores/graphStore';
 import { useCommandMenuStore } from '../../stores/commandMenuStore';
+import { useConnectionStore } from '../../stores/connectionStore';
 import { NodeCommandMenu } from './NodeCommandMenu';
-import { FileNode, VideoNode, ImageNode, BaseNode } from '../Nodes';
-import { ZoomInvariantEdge, ZoomInvariantConnectionLine } from '../Edges';
+import { FileNode, VideoNode, ImageNode, BlurNode, ColorAdjustNode, BaseNode } from '../Nodes';
+import { ZoomInvariantEdge, ZoomInvariantConnectionLine, ClickConnectionLine } from '../Edges';
 
 // Component to initialize hotkeys inside ReactFlow context
 function CanvasHotkeys() {
@@ -28,6 +29,8 @@ const nodeTypes = {
     file: FileNode,
     video: VideoNode,
     image: ImageNode,
+    blur: BlurNode,
+    colorAdjust: ColorAdjustNode,
     default: BaseNode,
 };
 
@@ -51,12 +54,47 @@ export function FlowCanvas() {
     const commandMenuOpen = useCommandMenuStore((state) => state.isOpen);
     const closeCommandMenu = useCommandMenuStore((state) => state.close);
 
+    // Click-to-connect state
+    const activeConnection = useConnectionStore((state) => state.activeConnection);
+    const updateMousePosition = useConnectionStore((state) => state.updateMousePosition);
+    const cancelConnection = useConnectionStore((state) => state.cancelConnection);
+
     const handleCommandMenuOpenChange = useCallback((open: boolean) => {
         if (!open) closeCommandMenu();
     }, [closeCommandMenu]);
 
     const { handleFileDrop, handleFileDragOver } = useDragAndDropFiles();
-    const { fitView } = useReactFlow();
+    const { fitView, screenToFlowPosition } = useReactFlow();
+
+    // Track mouse position when connecting
+    const handleMouseMove = useCallback((event: React.MouseEvent) => {
+        if (!activeConnection) return;
+
+        const flowPosition = screenToFlowPosition({
+            x: event.clientX,
+            y: event.clientY,
+        });
+        updateMousePosition(flowPosition.x, flowPosition.y);
+    }, [activeConnection, screenToFlowPosition, updateMousePosition]);
+
+    // Cancel connection on background click
+    const handlePaneClick = useCallback(() => {
+        if (activeConnection) {
+            cancelConnection();
+        }
+    }, [activeConnection, cancelConnection]);
+
+    // Cancel connection on Escape key
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape' && activeConnection) {
+                cancelConnection();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [activeConnection, cancelConnection]);
 
     // Double-click on node to zoom and center it
     const onNodeDoubleClick = useCallback((_event: React.MouseEvent, node: Node) => {
@@ -88,9 +126,10 @@ export function FlowCanvas() {
 
     return (
         <div
-            style={{ width: '100vw', height: '100vh' }}
+            className="w-full h-full"
             onDrop={onDrop}
             onDragOver={handleFileDragOver}
+            onMouseMove={handleMouseMove}
         >
             <ReactFlow
                 nodes={nodes}
@@ -103,6 +142,7 @@ export function FlowCanvas() {
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
                 onNodeDoubleClick={onNodeDoubleClick}
+                onPaneClick={handlePaneClick}
                 panOnScroll
                 selectionOnDrag
                 panOnDrag={[1, 2]}
@@ -119,6 +159,8 @@ export function FlowCanvas() {
                     open={commandMenuOpen}
                     onOpenChange={handleCommandMenuOpenChange}
                 />
+                {/* Click-to-connect connection line */}
+                {activeConnection && <ClickConnectionLine />}
             </ReactFlow>
         </div>
     );

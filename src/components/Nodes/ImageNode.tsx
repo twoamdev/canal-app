@@ -89,6 +89,7 @@ export function ImageNode(props: NodeProps<ImageNode>) {
             {...props}
             icon={<ImageIcon className="w-5 h-5" />}
             variant="success"
+            showInputHandle={false}
         >
             {hasFile ? (
                 <div className="text-xs text-muted-foreground space-y-2">

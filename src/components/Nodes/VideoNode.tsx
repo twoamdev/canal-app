@@ -19,17 +19,6 @@ export function VideoNode(props: NodeProps<VideoNode>) {
         }));
     }, [props.id, updateNode]);
 
-    const handleFrameChange = useCallback((frameIndex: number) => {
-        updateNode(props.id, (node) => ({
-            data: {
-                ...node.data,
-                extractedFrames: node.data.extractedFrames
-                    ? { ...node.data.extractedFrames, currentFrameIndex: frameIndex }
-                    : undefined,
-            },
-        }));
-    }, [props.id, updateNode]);
-
     const hasFile = !!props.data.file;
 
     return (
@@ -37,6 +26,7 @@ export function VideoNode(props: NodeProps<VideoNode>) {
             {...props}
             icon={<FileVideo className="w-5 h-5" />}
             variant="primary"
+            showInputHandle={false}
         >
             {hasFile ? (
                 <div className="text-xs text-muted-foreground space-y-2">
@@ -52,13 +42,12 @@ export function VideoNode(props: NodeProps<VideoNode>) {
                         </div>
                     </div>
 
-                    {/* Frame scrubber */}
+                    {/* Frame preview (synced with global timeline) */}
                     <FrameScrubber
-                        nodeId={props.id}
                         file={props.data.file!}
                         extractedFrames={props.data.extractedFrames}
+                        isSelected={props.selected ?? false}
                         onExtracted={handleExtracted}
-                        onFrameChange={handleFrameChange}
                     />
                 </div>
             ) : (

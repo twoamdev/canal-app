@@ -9,14 +9,16 @@ import {
     CommandItem,
 } from '@/components/ui/command';
 import { useGraphStore } from '../../stores/graphStore';
-import { NODE_REGISTRY, type GraphNode, type FileBasedNodeType } from '../../types/nodes';
-import { FileVideo, Image, File } from 'lucide-react';
+import { NODE_REGISTRY, type GraphNode } from '../../types/nodes';
+import { FileVideo, Image, File, CircleDot, Palette } from 'lucide-react';
 
 // Map icon names to components
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
     FileVideo,
     Image,
     File,
+    CircleDot,
+    Palette,
 };
 
 interface NodeCommandMenuProps {
@@ -36,7 +38,7 @@ export function NodeCommandMenu({ open, onOpenChange }: NodeCommandMenuProps) {
         }
     }, [open]);
 
-    const createNode = useCallback((nodeType: FileBasedNodeType) => {
+    const createNode = useCallback((nodeType: string) => {
         // Get viewport center in screen coordinates
         const screenCenterX = window.innerWidth / 2;
         const screenCenterY = window.innerHeight / 2;
@@ -47,15 +49,20 @@ export function NodeCommandMenu({ open, onOpenChange }: NodeCommandMenuProps) {
             y: screenCenterY,
         });
 
-        // Create the node
+        // Find the node definition to get defaultData
+        const nodeDef = NODE_REGISTRY.find((n) => n.type === nodeType);
+        const defaultData = nodeDef?.defaultData ?? {};
+
+        // Create the node with defaultData
         const newNode: GraphNode = {
             id: `${nodeType}-node-${Date.now()}`,
             type: nodeType,
             position: flowPosition,
             data: {
-                label: `New ${nodeType.charAt(0).toUpperCase() + nodeType.slice(1)}`,
+                label: defaultData.label ?? `New ${nodeType.charAt(0).toUpperCase() + nodeType.slice(1)}`,
+                ...defaultData,
             },
-        };
+        } as GraphNode;
 
         addNode(newNode);
         onOpenChange(false);
@@ -72,6 +79,7 @@ export function NodeCommandMenu({ open, onOpenChange }: NodeCommandMenuProps) {
 
     const categoryLabels: Record<string, string> = {
         input: 'Input Nodes',
+        effect: 'Effect Nodes',
         transform: 'Transform Nodes',
         output: 'Output Nodes',
         utility: 'Utility Nodes',
@@ -99,7 +107,7 @@ export function NodeCommandMenu({ open, onOpenChange }: NodeCommandMenuProps) {
                                 <CommandItem
                                     key={node.type}
                                     value={`${node.label} ${node.description}`}
-                                    onSelect={() => createNode(node.type as FileBasedNodeType)}
+                                    onSelect={() => createNode(node.type)}
                                 >
                                     <IconComponent className="mr-2 h-4 w-4" />
                                     <div className="flex flex-col">
