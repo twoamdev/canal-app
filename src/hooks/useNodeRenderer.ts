@@ -15,7 +15,10 @@ import {
   getSourceFrameInfo,
   getSourceDimensions,
 } from '../utils/graph-traversal';
+import { getSourceFrameForGlobalFrame } from '../utils/node-time';
+import { useTimelineStore } from '../stores/timelineStore';
 import { loadFrameFromOPFS, getFramePath, type FrameFormat } from '../utils/frame-storage';
+import { opfsManager } from '../utils/opfs';
 import type { RenderNode } from '../gpu/RenderPipeline';
 import type { GPUTexture } from '../gpu/types';
 
@@ -39,7 +42,9 @@ interface NodeRendererState {
 
 interface NodeRendererActions {
   renderFrame: (frameIndex: number) => Promise<void>;
+  renderGlobalFrame: (globalFrame: number) => Promise<boolean>; // Returns true if rendered, false if inactive
   getCurrentFrameIndex: () => number;
+  isActiveAtFrame: (globalFrame: number) => boolean;
 }
 
 export function useNodeRenderer(
@@ -79,6 +84,23 @@ export function useNodeRenderer(
     if (!upstreamChain.sourceNode) return null;
     return getSourceDimensions(upstreamChain.sourceNode);
   }, [upstreamChain.sourceNode]);
+
+  // Get global timeline range
+  const frameStart = useTimelineStore((state) => state.frameStart);
+  const frameEnd = useTimelineStore((state) => state.frameEnd);
+
+  // Map global frame to source frame using time range
+  const mapGlobalToSourceFrame = useCallback(
+    (globalFrame: number): number | null => {
+      if (!upstreamChain.sourceNode) return null;
+      return getSourceFrameForGlobalFrame(
+        upstreamChain.sourceNode,
+        globalFrame,
+        { start: frameStart, end: frameEnd }
+      );
+    },
+    [upstreamChain.sourceNode, frameStart, frameEnd]
+  );
 
   // Initialize GPU lazily
   const initGPU = useCallback(async () => {
@@ -161,13 +183,21 @@ export function useNodeRenderer(
       // Load frame from cache or OPFS
       let bitmap = frameCacheRef.current.get(frameIndex);
       if (!bitmap) {
-        const framePath = getFramePath(
-          sourceFrameInfo.opfsPath,
-          frameIndex,
-          sourceFrameInfo.format as FrameFormat
-        );
         try {
-          bitmap = await loadFrameFromOPFS(framePath);
+          if (sourceFrameInfo.sourceType === 'video') {
+            // Load video frame from extracted frames
+            const framePath = getFramePath(
+              sourceFrameInfo.opfsPath,
+              frameIndex,
+              sourceFrameInfo.format as FrameFormat
+            );
+            bitmap = await loadFrameFromOPFS(framePath);
+          } else {
+            // Load image directly from OPFS
+            const imageFile = await opfsManager.getFile(sourceFrameInfo.opfsPath);
+            bitmap = await createImageBitmap(imageFile);
+          }
+
           frameCacheRef.current.set(frameIndex, bitmap);
 
           // Simple cache limit
@@ -297,6 +327,38 @@ export function useNodeRenderer(
     return currentFrameRef.current;
   }, []);
 
+  // Check if source is active at a global frame
+  const isActiveAtFrame = useCallback(
+    (globalFrame: number): boolean => {
+      const sourceFrame = mapGlobalToSourceFrame(globalFrame);
+      return sourceFrame !== null;
+    },
+    [mapGlobalToSourceFrame]
+  );
+
+  // Render a global frame (maps to source frame, handles inactive)
+  const renderGlobalFrame = useCallback(
+    async (globalFrame: number): Promise<boolean> => {
+      const canvas = canvasRef.current;
+      if (!canvas) return false;
+
+      const sourceFrame = mapGlobalToSourceFrame(globalFrame);
+
+      if (sourceFrame === null) {
+        // Node is inactive - clear canvas to transparent
+        const ctx2d = canvas.getContext('2d');
+        if (ctx2d) {
+          ctx2d.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        return false;
+      }
+
+      await renderFrame(sourceFrame);
+      return true;
+    },
+    [canvasRef, mapGlobalToSourceFrame, renderFrame]
+  );
+
   // State
   const state = useMemo<NodeRendererState>(
     () => ({
@@ -313,9 +375,11 @@ export function useNodeRenderer(
   const actions = useMemo<NodeRendererActions>(
     () => ({
       renderFrame,
+      renderGlobalFrame,
       getCurrentFrameIndex,
+      isActiveAtFrame,
     }),
-    [renderFrame, getCurrentFrameIndex]
+    [renderFrame, renderGlobalFrame, getCurrentFrameIndex, isActiveAtFrame]
   );
 
   return [state, actions];

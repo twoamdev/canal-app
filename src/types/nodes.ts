@@ -10,6 +10,27 @@ export interface BaseNodeData {
   [key: string]: unknown;
 }
 
+// =============================================================================
+// Time and Format Types
+// =============================================================================
+
+/**
+ * Node time range - defines when a node is active on the timeline
+ */
+export interface NodeTimeRange {
+  inFrame: number;        // First frame this node is active (inclusive)
+  outFrame: number;       // Last frame this node is active (exclusive)
+  sourceOffset?: number;  // For videos: which source frame maps to inFrame
+}
+
+/**
+ * Node format - defines the output dimensions of a node
+ */
+export interface NodeFormat {
+  width: number;
+  height: number;
+}
+
 /**
  * Extracted frames metadata (persisted)
  */
@@ -78,13 +99,17 @@ export interface FileNodeData extends BaseNodeData {
  */
 export interface VideoNodeData extends FileNodeData {
   extractedFrames?: ExtractedFramesInfo;
+  timeRange?: NodeTimeRange;  // Defaults: { inFrame: 0, outFrame: frameCount, sourceOffset: 0 }
+  format?: NodeFormat;        // Defaults to native video dimensions
 }
 
 /**
  * Image node data - extends file node with image-specific features
  */
 export interface ImageNodeData extends FileNodeData {
-  // Future: dimensions, thumbnail, filters applied, etc.
+  nativeDimensions?: NodeFormat;  // Native image dimensions (persisted on load)
+  timeRange?: NodeTimeRange;      // Defaults: inherit from global timeline
+  format?: NodeFormat;            // Defaults to nativeDimensions
 }
 
 /**

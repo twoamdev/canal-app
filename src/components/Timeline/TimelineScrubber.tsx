@@ -3,13 +3,22 @@ import { useTimelineStore } from '../../stores/timelineStore';
 import { Repeat } from 'lucide-react';
 
 // Tick spacing configuration
-const MIN_TICK_SPACING = 8; // Minimum pixels between minor ticks
-const MAJOR_TICK_INTERVALS = [1, 5, 10, 15, 30, 60, 120, 300]; // Frame intervals for major ticks
+const MIN_MINOR_TICK_SPACING = 6; // Minimum pixels between minor ticks
+const MIN_MAJOR_TICK_SPACING = 60; // Minimum pixels between major ticks (for labels)
+
+// Nice intervals for tick marks (will be scaled by power of 10)
+const NICE_INTERVALS = [1, 2, 5, 10];
 
 export function TimelineScrubber() {
   const trackRef = useRef<HTMLDivElement>(null);
   const [trackWidth, setTrackWidth] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+
+  // Local state for input editing (allows clearing/typing)
+  const [inInputValue, setInInputValue] = useState<string>('');
+  const [outInputValue, setOutInputValue] = useState<string>('');
+  const [isEditingIn, setIsEditingIn] = useState(false);
+  const [isEditingOut, setIsEditingOut] = useState(false);
 
   const currentFrame = useTimelineStore((state) => state.currentFrame);
   const frameStart = useTimelineStore((state) => state.frameStart);
@@ -18,6 +27,7 @@ export function TimelineScrubber() {
   const isLooping = useTimelineStore((state) => state.isLooping);
   const fps = useTimelineStore((state) => state.fps);
   const setCurrentFrame = useTimelineStore((state) => state.setCurrentFrame);
+  const setFrameRange = useTimelineStore((state) => state.setFrameRange);
   const setIsPlaying = useTimelineStore((state) => state.setIsPlaying);
   const togglePlayback = useTimelineStore((state) => state.togglePlayback);
   const toggleLooping = useTimelineStore((state) => state.toggleLooping);
@@ -45,35 +55,56 @@ export function TimelineScrubber() {
     return () => observer.disconnect();
   }, []);
 
+  // Find a "nice" interval that's >= minInterval
+  const getNiceInterval = useCallback((minInterval: number): number => {
+    if (minInterval <= 0) return 1;
+
+    // Find the order of magnitude
+    const magnitude = Math.pow(10, Math.floor(Math.log10(minInterval)));
+
+    // Find the smallest nice interval >= minInterval
+    for (const nice of NICE_INTERVALS) {
+      const interval = nice * magnitude;
+      if (interval >= minInterval) {
+        return interval;
+      }
+    }
+    // Fall back to next magnitude
+    return 10 * magnitude;
+  }, []);
+
   // Calculate tick configuration based on available width
   const tickConfig = useCallback(() => {
-    if (trackWidth === 0 || totalFrames === 0) {
+    if (trackWidth === 0 || totalFrames <= 0) {
       return { minorInterval: 1, majorInterval: 10, pixelsPerFrame: 0 };
     }
 
     const pixelsPerFrame = trackWidth / totalFrames;
 
-    // Find appropriate minor tick interval
-    let minorInterval = 1;
-    for (const interval of [1, 2, 5, 10, 15, 30, 60]) {
-      if (pixelsPerFrame * interval >= MIN_TICK_SPACING) {
-        minorInterval = interval;
-        break;
-      }
-      minorInterval = interval;
+    // Calculate minimum intervals based on pixel spacing requirements
+    const minMinorInterval = MIN_MINOR_TICK_SPACING / pixelsPerFrame;
+    const minMajorInterval = MIN_MAJOR_TICK_SPACING / pixelsPerFrame;
+
+    // Get nice intervals
+    const majorInterval = Math.max(1, getNiceInterval(minMajorInterval));
+
+    // Minor interval should divide evenly into major interval
+    // Use 5 minor ticks per major tick, or 2 if that's too dense
+    let minorInterval = majorInterval / 5;
+    if (minorInterval < minMinorInterval) {
+      minorInterval = majorInterval / 2;
+    }
+    if (minorInterval < minMinorInterval || minorInterval < 1) {
+      minorInterval = majorInterval; // No minor ticks, just major
     }
 
-    // Find appropriate major tick interval (should be multiple of minor)
-    let majorInterval = minorInterval * 5;
-    for (const interval of MAJOR_TICK_INTERVALS) {
-      if (interval >= minorInterval * 5 && interval % minorInterval === 0) {
-        majorInterval = interval;
-        break;
-      }
-    }
-
-    return { minorInterval, majorInterval, pixelsPerFrame };
-  }, [trackWidth, totalFrames]);
+    // Ensure intervals are integers (we're dealing with frames)
+    return {
+      minorInterval: Math.max(1, Math.round(minorInterval)),
+      majorInterval: Math.max(1, Math.round(majorInterval)),
+      pixelsPerFrame,
+    };
+  }, [trackWidth, totalFrames, getNiceInterval]);
 
   const { minorInterval, majorInterval, pixelsPerFrame } = tickConfig();
 
@@ -81,16 +112,20 @@ export function TimelineScrubber() {
   const ticks = useCallback(() => {
     const result: Array<{ frame: number; isMajor: boolean; x: number }> = [];
 
-    if (pixelsPerFrame === 0) return result;
+    if (pixelsPerFrame === 0 || totalFrames <= 0) return result;
 
-    for (let frame = frameStart; frame <= frameEnd; frame += minorInterval) {
+    // Start from the first tick frame that's >= frameStart and aligned to minorInterval
+    const firstTick = Math.ceil(frameStart / minorInterval) * minorInterval;
+
+    for (let frame = firstTick; frame <= frameEnd; frame += minorInterval) {
+      // A tick is major if it aligns with the major interval
       const isMajor = frame % majorInterval === 0;
       const x = (frame - frameStart) * pixelsPerFrame;
       result.push({ frame, isMajor, x });
     }
 
     return result;
-  }, [frameStart, frameEnd, minorInterval, majorInterval, pixelsPerFrame]);
+  }, [frameStart, frameEnd, minorInterval, majorInterval, pixelsPerFrame, totalFrames]);
 
   // Scrubber position
   const scrubberX = (currentFrame - frameStart) * pixelsPerFrame;
@@ -224,6 +259,62 @@ export function TimelineScrubber() {
     return frame.toString().padStart(4, '0');
   };
 
+  // Frame In input handlers
+  const handleInFocus = useCallback(() => {
+    setInInputValue(frameStart.toString());
+    setIsEditingIn(true);
+  }, [frameStart]);
+
+  const handleInChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setInInputValue(e.target.value);
+  }, []);
+
+  const handleInBlur = useCallback(() => {
+    setIsEditingIn(false);
+    const value = parseInt(inInputValue, 10);
+    if (!isNaN(value) && value >= 0 && value < frameEnd) {
+      setFrameRange(value, frameEnd);
+    }
+    // Reset to store value (will show on next render)
+  }, [inInputValue, frameEnd, setFrameRange]);
+
+  const handleInKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.currentTarget.blur();
+    } else if (e.key === 'Escape') {
+      setIsEditingIn(false);
+      setInInputValue(frameStart.toString());
+    }
+  }, [frameStart]);
+
+  // Frame Out input handlers
+  const handleOutFocus = useCallback(() => {
+    setOutInputValue(frameEnd.toString());
+    setIsEditingOut(true);
+  }, [frameEnd]);
+
+  const handleOutChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setOutInputValue(e.target.value);
+  }, []);
+
+  const handleOutBlur = useCallback(() => {
+    setIsEditingOut(false);
+    const value = parseInt(outInputValue, 10);
+    if (!isNaN(value) && value > frameStart) {
+      setFrameRange(frameStart, value);
+    }
+    // Reset to store value (will show on next render)
+  }, [outInputValue, frameStart, setFrameRange]);
+
+  const handleOutKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.currentTarget.blur();
+    } else if (e.key === 'Escape') {
+      setIsEditingOut(false);
+      setOutInputValue(frameEnd.toString());
+    }
+  }, [frameEnd]);
+
   return (
     <div className="h-12 bg-card border-t border-border flex items-stretch select-none">
       {/* Control buttons */}
@@ -239,6 +330,21 @@ export function TimelineScrubber() {
         >
           <Repeat className="w-4 h-4" />
         </button>
+      </div>
+
+      {/* Frame In input */}
+      <div className="flex items-center px-2 border-r border-border bg-muted/30 gap-1">
+        <span className="text-[10px] text-muted-foreground uppercase">In</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={isEditingIn ? inInputValue : frameStart}
+          onFocus={handleInFocus}
+          onChange={handleInChange}
+          onBlur={handleInBlur}
+          onKeyDown={handleInKeyDown}
+          className="w-16 h-7 px-1.5 text-sm font-mono tabular-nums bg-background border border-border rounded text-center focus:outline-none focus:ring-1 focus:ring-primary"
+        />
       </div>
 
       {/* Timecode display */}
@@ -267,9 +373,9 @@ export function TimelineScrubber() {
                 className={`w-px ${isMajor ? 'h-4 bg-muted-foreground' : 'h-2 bg-muted-foreground/50'}`}
               />
               {/* Frame label for major ticks */}
-              {isMajor && pixelsPerFrame * majorInterval > 30 && (
+              {isMajor && (
                 <span
-                  className="absolute bottom-5 text-[10px] text-muted-foreground font-mono -translate-x-1/2"
+                  className="absolute bottom-5 text-[10px] text-muted-foreground font-mono tabular-nums -translate-x-1/2 whitespace-nowrap"
                   style={{ left: 0 }}
                 >
                   {frame}
@@ -303,6 +409,21 @@ export function TimelineScrubber() {
             className="absolute top-2 bottom-0 w-px bg-primary left-1/2 -translate-x-1/2"
           />
         </div>
+      </div>
+
+      {/* Frame Out input */}
+      <div className="flex items-center px-2 border-l border-border bg-muted/30 gap-1">
+        <span className="text-[10px] text-muted-foreground uppercase">Out</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={isEditingOut ? outInputValue : frameEnd}
+          onFocus={handleOutFocus}
+          onChange={handleOutChange}
+          onBlur={handleOutBlur}
+          onKeyDown={handleOutKeyDown}
+          className="w-16 h-7 px-1.5 text-sm font-mono tabular-nums bg-background border border-border rounded text-center focus:outline-none focus:ring-1 focus:ring-primary"
+        />
       </div>
     </div>
   );

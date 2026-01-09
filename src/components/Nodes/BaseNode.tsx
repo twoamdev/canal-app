@@ -12,6 +12,7 @@ const HANDLE_BASE_SIZE = 12;
 interface BaseNodeCustomProps {
   children?: React.ReactNode;
   icon?: React.ReactNode;
+  dimensions?: { width: number; height: number } | null;
   showInputHandle?: boolean;
   showOutputHandle?: boolean;
   variant?: 'default' | 'primary' | 'success' | 'warning' | 'destructive';
@@ -58,6 +59,7 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
     selected,
     children,
     icon,
+    dimensions,
     showInputHandle = true,
     showOutputHandle = true,
     variant = 'default',
@@ -89,14 +91,18 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
 
     // If there's an active connection from a target handle, complete the connection
     if (activeConnection?.handleType === 'target' && activeConnection?.nodeId !== props.id) {
+      // Remove any existing edge connected to the target handle (single connection per input)
+      const filteredEdges = edges.filter(
+        (edge) => !(edge.target === activeConnection.nodeId && edge.targetHandle === null)
+      );
       // Create edge: this source -> active target
-      const newEdge = addEdge({
+      const newEdges = addEdge({
         source: props.id,
         target: activeConnection.nodeId,
         sourceHandle: null,
         targetHandle: null,
-      }, edges);
-      setEdges(newEdge);
+      }, filteredEdges);
+      setEdges(newEdges);
       cancelConnection();
       return;
     }
@@ -136,14 +142,18 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
 
     // If there's an active connection from a source handle, complete the connection
     if (activeConnection?.handleType === 'source' && activeConnection?.nodeId !== props.id) {
+      // Remove any existing edge connected to this target handle (single connection per input)
+      const filteredEdges = edges.filter(
+        (edge) => !(edge.target === props.id && edge.targetHandle === null)
+      );
       // Create edge: active source -> this target
-      const newEdge = addEdge({
+      const newEdges = addEdge({
         source: activeConnection.nodeId,
         target: props.id,
         sourceHandle: null,
         targetHandle: null,
-      }, edges);
-      setEdges(newEdge);
+      }, filteredEdges);
+      setEdges(newEdges);
       cancelConnection();
       return;
     }
@@ -221,6 +231,11 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
             <p className="font-semibold text-sm text-foreground truncate">
               {data.label}
             </p>
+            {dimensions && (
+              <p className="text-xs text-muted-foreground tabular-nums">
+                {dimensions.width} × {dimensions.height}
+              </p>
+            )}
           </div>
         </div>
 

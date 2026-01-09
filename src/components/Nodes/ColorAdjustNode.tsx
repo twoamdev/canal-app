@@ -30,12 +30,11 @@ export function ColorAdjustNode(props: NodeProps<ColorAdjustNodeType>) {
   useEffect(() => {
     if (!state.hasSource || state.frameCount === 0) return;
 
-    const frameIndex = Math.min(currentFrame, state.frameCount - 1);
-
     // Only render if selected OR if we haven't rendered yet
     if (isSelected || lastRenderedFrameRef.current === -1) {
-      actions.renderFrame(frameIndex);
-      lastRenderedFrameRef.current = frameIndex;
+      // Use renderGlobalFrame which handles time range mapping
+      actions.renderGlobalFrame(currentFrame);
+      lastRenderedFrameRef.current = currentFrame;
     }
   }, [state.hasSource, state.frameCount, currentFrame, isSelected, actions]);
 
@@ -44,8 +43,8 @@ export function ColorAdjustNode(props: NodeProps<ColorAdjustNodeType>) {
     if (!state.hasSource || state.frameCount === 0) return;
     if (lastRenderedFrameRef.current === -1) return;
 
-    // Re-render with current displayed frame when params change
-    actions.renderFrame(lastRenderedFrameRef.current);
+    // Re-render with last global frame when params change
+    actions.renderGlobalFrame(lastRenderedFrameRef.current);
   }, [
     props.data.parameters.brightness,
     props.data.parameters.contrast,
@@ -78,6 +77,7 @@ export function ColorAdjustNode(props: NodeProps<ColorAdjustNodeType>) {
     <BaseNode
       {...props}
       icon={<Palette className="w-5 h-5" />}
+      dimensions={state.dimensions}
       variant="default"
     >
       <div className="text-xs text-muted-foreground space-y-3">

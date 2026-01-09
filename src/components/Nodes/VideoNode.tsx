@@ -15,16 +15,33 @@ export function VideoNode(props: NodeProps<VideoNode>) {
             data: {
                 ...node.data,
                 extractedFrames: info,
+                // Set default time range if not already set
+                timeRange: node.data.timeRange ?? {
+                    inFrame: 0,
+                    outFrame: info.frameCount,
+                    sourceOffset: 0,
+                },
+                // Set format from native dimensions if not already set
+                format: node.data.format ?? {
+                    width: info.width,
+                    height: info.height,
+                },
             },
         }));
     }, [props.id, updateNode]);
 
     const hasFile = !!props.data.file;
 
+    // Get dimensions from extractedFrames or format override
+    const dimensions = props.data.format ?? (props.data.extractedFrames
+        ? { width: props.data.extractedFrames.width, height: props.data.extractedFrames.height }
+        : null);
+
     return (
         <BaseNode
             {...props}
             icon={<FileVideo className="w-5 h-5" />}
+            dimensions={dimensions}
             variant="primary"
             showInputHandle={false}
         >
@@ -46,6 +63,7 @@ export function VideoNode(props: NodeProps<VideoNode>) {
                     <FrameScrubber
                         file={props.data.file!}
                         extractedFrames={props.data.extractedFrames}
+                        timeRange={props.data.timeRange}
                         isSelected={props.selected ?? false}
                         onExtracted={handleExtracted}
                     />

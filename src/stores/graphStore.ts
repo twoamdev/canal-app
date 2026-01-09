@@ -63,7 +63,24 @@ export const useGraphStore = create<GraphState>()(
 
       // Actions
       setNodes: (nodes) => set({ nodes }),
-      setEdges: (edges) => set({ edges }),
+      setEdges: (edges) => {
+        // Enforce single-connection-per-input: keep only the last edge for each target+targetHandle
+        const seenTargets = new Map<string, Edge>();
+        // Process in reverse so the "last" (newest) edge wins
+        for (let i = edges.length - 1; i >= 0; i--) {
+          const edge = edges[i];
+          const key = `${edge.target}:${edge.targetHandle ?? 'default'}`;
+          if (!seenTargets.has(key)) {
+            seenTargets.set(key, edge);
+          }
+        }
+        // Restore original order
+        const filteredEdges = edges.filter((edge) => {
+          const key = `${edge.target}:${edge.targetHandle ?? 'default'}`;
+          return seenTargets.get(key) === edge;
+        });
+        set({ edges: filteredEdges });
+      },
       
       // ReactFlow change handlers
       onNodesChange: (changes) => {
@@ -92,9 +109,27 @@ export const useGraphStore = create<GraphState>()(
       },
       
       onEdgesChange: (changes) => {
-        set((state) => ({
-          edges: applyEdgeChanges(changes, state.edges),
-        }));
+        set((state) => {
+          const newEdges = applyEdgeChanges(changes, state.edges);
+
+          // Enforce single-connection-per-input: keep only the last edge for each target+targetHandle
+          const seenTargets = new Map<string, Edge>();
+          // Process in reverse so the "last" (newest) edge wins
+          for (let i = newEdges.length - 1; i >= 0; i--) {
+            const edge = newEdges[i];
+            const key = `${edge.target}:${edge.targetHandle ?? 'default'}`;
+            if (!seenTargets.has(key)) {
+              seenTargets.set(key, edge);
+            }
+          }
+          // Restore original order
+          const filteredEdges = newEdges.filter((edge) => {
+            const key = `${edge.target}:${edge.targetHandle ?? 'default'}`;
+            return seenTargets.get(key) === edge;
+          });
+
+          return { edges: filteredEdges };
+        });
       },
       
       addNode: (node) =>
@@ -144,9 +179,15 @@ export const useGraphStore = create<GraphState>()(
         }),
 
       addEdge: (edge) =>
-        set((state) => ({
-          edges: [...state.edges, edge],
-        })),
+        set((state) => {
+          // Remove any existing edge to the same target+targetHandle (single connection per input)
+          const key = `${edge.target}:${edge.targetHandle ?? 'default'}`;
+          const filteredEdges = state.edges.filter((e) => {
+            const eKey = `${e.target}:${e.targetHandle ?? 'default'}`;
+            return eKey !== key;
+          });
+          return { edges: [...filteredEdges, edge] };
+        }),
 
       removeEdge: (id) =>
         set((state) => ({

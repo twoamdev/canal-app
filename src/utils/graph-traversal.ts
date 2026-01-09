@@ -5,7 +5,7 @@
  */
 
 import type { Edge } from '@xyflow/react';
-import type { GraphNode, EffectConfig } from '../types/nodes';
+import type { GraphNode, EffectConfig, NodeFormat, VideoNodeData, ImageNodeData } from '../types/nodes';
 
 /**
  * Result of traversing upstream from a node
@@ -162,7 +162,11 @@ export function getSourceDimensions(
   sourceNode: GraphNode
 ): { width: number; height: number } | null {
   if (sourceNode.type === 'video') {
-    const data = sourceNode.data as { extractedFrames?: { width: number; height: number } };
+    const data = sourceNode.data as VideoNodeData;
+    // Use explicit format if set, otherwise use native dimensions from extractedFrames
+    if (data.format) {
+      return { width: data.format.width, height: data.format.height };
+    }
     if (data.extractedFrames) {
       return {
         width: data.extractedFrames.width,
@@ -170,19 +174,86 @@ export function getSourceDimensions(
       };
     }
   }
-  // TODO: Handle image nodes
+
+  if (sourceNode.type === 'image') {
+    const data = sourceNode.data as ImageNodeData;
+    // Use explicit format if set, otherwise use native dimensions
+    if (data.format) {
+      return { width: data.format.width, height: data.format.height };
+    }
+    if (data.nativeDimensions) {
+      return {
+        width: data.nativeDimensions.width,
+        height: data.nativeDimensions.height,
+      };
+    }
+  }
+
   return null;
 }
 
 /**
- * Get the frame info from a source node (for video nodes)
+ * Get the effective format (dimensions) for a node
+ *
+ * - For source nodes (video/image): returns explicit format or native dimensions
+ * - For effect nodes: returns null (use getUpstreamFormat instead)
  */
-export function getSourceFrameInfo(sourceNode: GraphNode): {
+export function getNodeFormat(node: GraphNode): NodeFormat | null {
+  if (node.type === 'video') {
+    const data = node.data as VideoNodeData;
+    if (data.format) return data.format;
+    if (data.extractedFrames) {
+      return {
+        width: data.extractedFrames.width,
+        height: data.extractedFrames.height,
+      };
+    }
+    return null;
+  }
+
+  if (node.type === 'image') {
+    const data = node.data as ImageNodeData;
+    if (data.format) return data.format;
+    if (data.nativeDimensions) return data.nativeDimensions;
+    return null;
+  }
+
+  // Effect nodes don't have their own format
+  return null;
+}
+
+/**
+ * Get the format from upstream source (for effect nodes)
+ *
+ * Traverses upstream to find the source node's format
+ */
+export function getUpstreamFormat(
+  nodeId: string,
+  nodes: GraphNode[],
+  edges: Edge[]
+): NodeFormat | null {
+  const chain = findUpstreamChain(nodeId, nodes, edges);
+  if (chain.sourceNode) {
+    return getNodeFormat(chain.sourceNode);
+  }
+  return null;
+}
+
+/**
+ * Source info for rendering - works for both video and image nodes
+ */
+export interface SourceInfo {
+  sourceType: 'video' | 'image';
   frameCount: number;
   currentFrameIndex: number;
   format: string;
   opfsPath: string;
-} | null {
+}
+
+/**
+ * Get the source info from a source node (video or image)
+ */
+export function getSourceFrameInfo(sourceNode: GraphNode): SourceInfo | null {
   if (sourceNode.type === 'video') {
     const data = sourceNode.data as {
       extractedFrames?: {
@@ -195,6 +266,7 @@ export function getSourceFrameInfo(sourceNode: GraphNode): {
 
     if (data.extractedFrames && data.file?.opfsPath) {
       return {
+        sourceType: 'video',
         frameCount: data.extractedFrames.frameCount,
         currentFrameIndex: data.extractedFrames.currentFrameIndex,
         format: data.extractedFrames.format,
@@ -202,5 +274,24 @@ export function getSourceFrameInfo(sourceNode: GraphNode): {
       };
     }
   }
+
+  if (sourceNode.type === 'image') {
+    const data = sourceNode.data as {
+      file?: { opfsPath: string; type: string };
+    };
+
+    if (data.file?.opfsPath) {
+      // Images are a single "frame" that's always active
+      const format = data.file.type.split('/')[1] || 'png';
+      return {
+        sourceType: 'image',
+        frameCount: 1,
+        currentFrameIndex: 0,
+        format,
+        opfsPath: data.file.opfsPath,
+      };
+    }
+  }
+
   return null;
 }

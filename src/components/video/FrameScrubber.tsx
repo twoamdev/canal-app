@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import type { OPFSFileMetadata } from '../../utils/opfs';
-import type { ExtractedFramesInfo } from '../../types/nodes';
+import type { ExtractedFramesInfo, NodeTimeRange } from '../../types/nodes';
 import { extractAndStoreFrames } from '../../utils/video-pipeline';
 import { loadFrameFromOPFS, getFramePath, type FrameFormat } from '../../utils/frame-storage';
 import { useTimelineStore } from '../../stores/timelineStore';
@@ -9,11 +9,12 @@ import { Progress } from '@/components/ui/progress';
 interface FrameScrubberProps {
     file: OPFSFileMetadata;
     extractedFrames?: ExtractedFramesInfo;
+    timeRange?: NodeTimeRange;
     isSelected: boolean;
     onExtracted: (info: ExtractedFramesInfo) => void;
 }
 
-export function FrameScrubber({ file, extractedFrames, isSelected, onExtracted }: FrameScrubberProps) {
+export function FrameScrubber({ file, extractedFrames, timeRange, isSelected, onExtracted }: FrameScrubberProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const frameCountRef = useRef<HTMLSpanElement>(null);
     const lastRenderedFrameRef = useRef<number>(-1);
@@ -125,18 +126,69 @@ export function FrameScrubber({ file, extractedFrames, isSelected, onExtracted }
         }
     }, [file.opfsPath, extractedFrames, addToCache]);
 
+    // Map global timeline frame to source frame using time range
+    const mapGlobalToSourceFrame = useCallback((globalFrame: number): number | null => {
+        if (!extractedFrames) return null;
+
+        // Get effective time range (use provided or default)
+        const range = timeRange ?? {
+            inFrame: 0,
+            outFrame: extractedFrames.frameCount,
+            sourceOffset: 0,
+        };
+
+        // Check if global frame is within this node's active range
+        if (globalFrame < range.inFrame || globalFrame >= range.outFrame) {
+            return null; // Node is inactive at this frame
+        }
+
+        // Calculate which source frame to use
+        const sourceOffset = range.sourceOffset ?? 0;
+        const relativeFrame = globalFrame - range.inFrame;
+        const sourceFrame = sourceOffset + relativeFrame;
+
+        // Clamp to available frames
+        if (sourceFrame < 0 || sourceFrame >= extractedFrames.frameCount) {
+            return null;
+        }
+
+        return sourceFrame;
+    }, [extractedFrames, timeRange]);
+
+    // Clear canvas to show transparency/black when node is inactive
+    const clearCanvas = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // Update frame counter to show inactive state
+        if (frameCountRef.current) {
+            frameCountRef.current.textContent = '--';
+        }
+    }, []);
+
     // Respond to global timeline changes - only render when selected or first time
     useEffect(() => {
         if (!extractedFrames) return;
 
-        const frameIndex = Math.min(currentFrame, extractedFrames.frameCount - 1);
+        const sourceFrame = mapGlobalToSourceFrame(currentFrame);
 
         // Only render if selected OR if we haven't rendered yet
         if (isSelected || lastRenderedFrameRef.current === -1) {
-            drawFrame(frameIndex);
-            lastRenderedFrameRef.current = frameIndex;
+            if (sourceFrame !== null) {
+                drawFrame(sourceFrame);
+                lastRenderedFrameRef.current = sourceFrame;
+            } else {
+                // Node is inactive at this frame - show black/transparent
+                clearCanvas();
+                lastRenderedFrameRef.current = -1;
+            }
         }
-    }, [extractedFrames, currentFrame, isSelected, drawFrame]);
+    }, [extractedFrames, currentFrame, isSelected, drawFrame, mapGlobalToSourceFrame, clearCanvas]);
 
     // Handle extraction
     const handleExtract = useCallback(async () => {

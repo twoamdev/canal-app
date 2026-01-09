@@ -107,8 +107,13 @@ export function FlowCanvas() {
 
     const onConnect: OnConnect = useCallback(
         (params) => {
-            const newEdge = addEdge(params, edges);
-            setEdges(newEdge);
+            // Remove any existing edge connected to the same target handle
+            // (each input can only have one connection)
+            const filteredEdges = edges.filter(
+                (edge) => !(edge.target === params.target && edge.targetHandle === params.targetHandle)
+            );
+            const newEdges = addEdge(params, filteredEdges);
+            setEdges(newEdges);
         },
         [edges, setEdges]
     );
