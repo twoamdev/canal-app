@@ -15,7 +15,7 @@ import { useGraphStore } from '../../stores/graphStore';
 import { useCommandMenuStore } from '../../stores/commandMenuStore';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { NodeCommandMenu } from './NodeCommandMenu';
-import { FileNode, VideoNode, ImageNode, BlurNode, ColorAdjustNode, BaseNode } from '../Nodes';
+import { FileNode, VideoNode, ImageNode, BlurNode, ColorAdjustNode, MergeNode, BaseNode } from '../Nodes';
 import { ZoomInvariantEdge, ZoomInvariantConnectionLine, ClickConnectionLine } from '../Edges';
 
 // Component to initialize hotkeys inside ReactFlow context
@@ -31,6 +31,7 @@ const nodeTypes = {
     image: ImageNode,
     blur: BlurNode,
     colorAdjust: ColorAdjustNode,
+    merge: MergeNode,
     default: BaseNode,
 };
 

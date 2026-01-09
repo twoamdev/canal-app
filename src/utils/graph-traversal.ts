@@ -27,6 +27,7 @@ export interface UpstreamChain {
 const EFFECT_TYPE_MAP: Record<string, string> = {
   blur: 'gaussianBlur',
   colorAdjust: 'colorAdjust',
+  merge: 'merge',
 };
 
 /**
@@ -37,7 +38,12 @@ const SOURCE_NODE_TYPES = ['video', 'image'];
 /**
  * Effect node types that process frames
  */
-const EFFECT_NODE_TYPES = ['blur', 'colorAdjust'];
+const EFFECT_NODE_TYPES = ['blur', 'colorAdjust', 'merge'];
+
+/**
+ * Multi-input node types (have more than one input handle)
+ */
+export const MULTI_INPUT_NODE_TYPES = ['merge'];
 
 /**
  * Find the upstream chain from a given node
@@ -294,4 +300,97 @@ export function getSourceFrameInfo(sourceNode: GraphNode): SourceInfo | null {
   }
 
   return null;
+}
+
+// =============================================================================
+// Multi-Input Node Support
+// =============================================================================
+
+/**
+ * Result for nodes with multiple inputs
+ */
+export interface MultiInputUpstreamChains {
+  // Map of handle ID to upstream chain
+  chains: Map<string, UpstreamChain>;
+  // The node itself
+  node: GraphNode | null;
+  // Whether all required inputs are connected
+  isComplete: boolean;
+}
+
+/**
+ * Find upstream chains for a multi-input node
+ *
+ * For merge nodes, this finds both the 'bg' and 'fg' input chains.
+ *
+ * @param nodeId The multi-input node to find chains for
+ * @param nodes All nodes in the graph
+ * @param edges All edges in the graph
+ * @returns Map of handle IDs to their upstream chains
+ */
+export function findMultiInputUpstreamChains(
+  nodeId: string,
+  nodes: GraphNode[],
+  edges: Edge[]
+): MultiInputUpstreamChains {
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const node = nodeMap.get(nodeId) ?? null;
+
+  if (!node) {
+    return { chains: new Map(), node: null, isComplete: false };
+  }
+
+  const chains = new Map<string, UpstreamChain>();
+
+  // Find all edges targeting this node, grouped by targetHandle
+  const incomingEdges = edges.filter((e) => e.target === nodeId);
+
+  for (const edge of incomingEdges) {
+    const handleId = edge.targetHandle ?? 'default';
+    // Recursively find upstream chain from the source node
+    const chain = findUpstreamChain(edge.source, nodes, edges);
+    chains.set(handleId, chain);
+  }
+
+  // For merge nodes, both 'bg' and 'fg' are required
+  let isComplete = false;
+  if (node.type === 'merge') {
+    const bgChain = chains.get('bg');
+    const fgChain = chains.get('fg');
+    isComplete = !!(bgChain?.isComplete && fgChain?.isComplete);
+  } else {
+    // For other multi-input nodes, at least one complete chain is required
+    isComplete = Array.from(chains.values()).some((chain) => chain.isComplete);
+  }
+
+  return { chains, node, isComplete };
+}
+
+/**
+ * Get dimensions for a merge node (uses bg input dimensions)
+ *
+ * @param nodeId The merge node ID
+ * @param nodes All nodes in the graph
+ * @param edges All edges in the graph
+ * @returns The output dimensions (from bg input) or null
+ */
+export function getMergeOutputDimensions(
+  nodeId: string,
+  nodes: GraphNode[],
+  edges: Edge[]
+): { width: number; height: number } | null {
+  const { chains } = findMultiInputUpstreamChains(nodeId, nodes, edges);
+  const bgChain = chains.get('bg');
+
+  if (bgChain?.sourceNode) {
+    return getSourceDimensions(bgChain.sourceNode);
+  }
+  return null;
+}
+
+/**
+ * Check if a node is a multi-input node
+ */
+export function isMultiInputNode(node: GraphNode): boolean {
+  return MULTI_INPUT_NODE_TYPES.includes(node.type ?? '');
 }

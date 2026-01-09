@@ -62,7 +62,7 @@ export interface EffectConfig {
  */
 export interface EffectNodeData extends BaseNodeData {
   // Parameters specific to the effect (e.g., { radius: 10 } for blur)
-  parameters: Record<string, number | number[] | boolean>;
+  parameters: Record<string, number | number[] | boolean | string>;
 }
 
 /**
@@ -83,6 +83,21 @@ export interface ColorAdjustNodeData extends EffectNodeData {
     contrast: number;
     saturation: number;
     exposure: number;
+  };
+}
+
+/**
+ * Blend modes for merge operations
+ */
+export type MergeBlendMode = 'over' | 'under' | 'add' | 'subtract' | 'screen' | 'overlay';
+
+/**
+ * Merge node data - composites two inputs with blend modes
+ */
+export interface MergeNodeData extends EffectNodeData {
+  parameters: {
+    blendMode: MergeBlendMode;
+    opacity: number;  // 0-1, foreground layer opacity
   };
 }
 
@@ -120,6 +135,7 @@ export type VideoNode = ReactFlowNode<VideoNodeData, 'video'>;
 export type ImageNode = ReactFlowNode<ImageNodeData, 'image'>;
 export type BlurNode = ReactFlowNode<BlurNodeData, 'blur'>;
 export type ColorAdjustNode = ReactFlowNode<ColorAdjustNodeData, 'colorAdjust'>;
+export type MergeNode = ReactFlowNode<MergeNodeData, 'merge'>;
 
 /**
  * Type alias for any node with base data
@@ -129,7 +145,7 @@ export type CustomNode<T extends BaseNodeData = BaseNodeData> = ReactFlowNode<T>
 /**
  * Union type of all possible node types in the graph
  */
-export type GraphNode = FileNode | VideoNode | ImageNode | BlurNode | ColorAdjustNode;
+export type GraphNode = FileNode | VideoNode | ImageNode | BlurNode | ColorAdjustNode | MergeNode;
 
 // Helper type to extract node data type from a node
 export type NodeData<T extends GraphNode> = T extends ReactFlowNode<infer D> ? D : never;
@@ -198,6 +214,20 @@ export const NODE_REGISTRY: NodeTypeDefinition[] = [
         contrast: 1,
         saturation: 1,
         exposure: 0,
+      },
+    },
+  },
+  {
+    type: 'merge',
+    label: 'Merge',
+    description: 'Combine two layers with blend modes',
+    icon: 'Layers',
+    category: 'effect',
+    defaultData: {
+      label: 'Merge',
+      parameters: {
+        blendMode: 'over',
+        opacity: 1,
       },
     },
   },
