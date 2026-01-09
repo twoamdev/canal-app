@@ -36,7 +36,7 @@ export function ColorAdjustNode(props: NodeProps<ColorAdjustNodeType>) {
       actions.renderGlobalFrame(currentFrame);
       lastRenderedFrameRef.current = currentFrame;
     }
-  }, [state.hasSource, state.frameCount, currentFrame, isSelected, actions]);
+  }, [state.hasSource, state.frameCount, state.compositeSourceFrameIndex, currentFrame, isSelected, actions]);
 
   // Always re-render when parameters change (even if not selected)
   useEffect(() => {

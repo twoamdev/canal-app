@@ -37,7 +37,7 @@ export function BlurNode(props: NodeProps<BlurNodeType>) {
       actions.renderGlobalFrame(currentFrame);
       lastRenderedFrameRef.current = currentFrame;
     }
-  }, [state.hasSource, state.frameCount, currentFrame, isSelected, props.data.parameters.radius, actions]);
+  }, [state.hasSource, state.frameCount, state.compositeSourceFrameIndex, currentFrame, isSelected, props.data.parameters.radius, actions]);
 
   // Always re-render when parameters change (even if not selected)
   useEffect(() => {

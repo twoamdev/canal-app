@@ -16,9 +16,11 @@ import {
   getSourceDimensions,
 } from '../utils/graph-traversal';
 import { getSourceFrameForGlobalFrame } from '../utils/node-time';
+import { getEffectiveTimeRange } from '../utils/layer-metadata';
 import { useTimelineStore } from '../stores/timelineStore';
 import { loadFrameFromOPFS, getFramePath, type FrameFormat } from '../utils/frame-storage';
 import { opfsManager } from '../utils/opfs';
+import { useRenderedOutputStore } from '../stores/renderedOutputStore';
 import type { RenderNode } from '../gpu/RenderPipeline';
 import type { GPUTexture } from '../gpu/types';
 
@@ -35,9 +37,17 @@ interface NodeRendererState {
   isReady: boolean;
   hasSource: boolean;
   sourceNodeId: string | null;
+  /** ID of composite source (merge) if upstream chain terminates at one */
+  compositeSourceId: string | null;
+  /** Whether the source is a composite (merge) */
+  hasCompositeSource: boolean;
+  /** Frame index of the composite source output (triggers re-render when it changes) */
+  compositeSourceFrameIndex: number | null;
   frameCount: number;
   currentFrameIndex: number;
   dimensions: { width: number; height: number } | null;
+  /** Effective time range from layer metadata (propagated from source) */
+  timeRange: { inFrame: number; outFrame: number } | null;
 }
 
 interface NodeRendererActions {
@@ -89,9 +99,34 @@ export function useNodeRenderer(
   const frameStart = useTimelineStore((state) => state.frameStart);
   const frameEnd = useTimelineStore((state) => state.frameEnd);
 
+  // Rendered output store - for getting and setting composite source outputs
+  const getRenderedOutput = useRenderedOutputStore((state) => state.getOutput);
+  const setRenderedOutput = useRenderedOutputStore((state) => state.setOutput);
+
+  // Composite source info (if upstream chain ends at a merge)
+  const compositeSourceId = upstreamChain.compositeSourceNode?.id ?? null;
+
+  // Subscribe to the composite source output - this will trigger re-render when merge output changes
+  const compositeSourceOutput = useRenderedOutputStore((state) =>
+    compositeSourceId ? state.outputs.get(compositeSourceId) : undefined
+  );
+
+  // Get effective time range from layer metadata (propagated through chain)
+  const effectiveTimeRange = useMemo(() => {
+    return getEffectiveTimeRange(nodeId, nodes, edges, {
+      start: frameStart,
+      end: frameEnd,
+    });
+  }, [nodeId, nodes, edges, frameStart, frameEnd]);
+
   // Map global frame to source frame using time range
   const mapGlobalToSourceFrame = useCallback(
     (globalFrame: number): number | null => {
+      // For composite sources (merge), just pass through the global frame
+      // The composite source handles its own time mapping
+      if (upstreamChain.hasCompositeSource) {
+        return globalFrame;
+      }
       if (!upstreamChain.sourceNode) return null;
       return getSourceFrameForGlobalFrame(
         upstreamChain.sourceNode,
@@ -99,22 +134,28 @@ export function useNodeRenderer(
         { start: frameStart, end: frameEnd }
       );
     },
-    [upstreamChain.sourceNode, frameStart, frameEnd]
+    [upstreamChain.sourceNode, upstreamChain.hasCompositeSource, frameStart, frameEnd]
   );
 
-  // Initialize GPU lazily
-  const initGPU = useCallback(async () => {
+  // Initialize GPU lazily - supports both primary sources and composite sources
+  const initGPU = useCallback(async (overrideDimensions?: { width: number; height: number }) => {
     if (glContextRef.current || initPromiseRef.current) {
       return initPromiseRef.current;
     }
 
-    if (!sourceDimensions) return;
+    // Use override dimensions, or sourceDimensions, or composite source dimensions
+    const compositeDims = compositeSourceOutput
+      ? { width: compositeSourceOutput.width, height: compositeSourceOutput.height }
+      : null;
+    const dims = overrideDimensions ?? sourceDimensions ?? compositeDims;
+
+    if (!dims) return;
 
     initPromiseRef.current = (async () => {
       try {
         const glCanvas = document.createElement('canvas');
-        glCanvas.width = sourceDimensions.width;
-        glCanvas.height = sourceDimensions.height;
+        glCanvas.width = dims.width;
+        glCanvas.height = dims.height;
         glCanvasRef.current = glCanvas;
 
         const glContext = new WebGLContext();
@@ -133,7 +174,7 @@ export function useNodeRenderer(
         pipelineRef.current = new RenderPipeline(glContext, pool);
 
         isReadyRef.current = true;
-        console.log('[useNodeRenderer] GPU initialized for node:', nodeId);
+        console.log('[useNodeRenderer] GPU initialized for node:', nodeId, 'with dimensions:', dims);
       } catch (err) {
         console.error('[useNodeRenderer] GPU init error:', err);
         isReadyRef.current = false;
@@ -141,7 +182,7 @@ export function useNodeRenderer(
     })();
 
     return initPromiseRef.current;
-  }, [nodeId, sourceDimensions]);
+  }, [nodeId, sourceDimensions, compositeSourceOutput]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -176,58 +217,96 @@ export function useNodeRenderer(
   const renderFrame = useCallback(
     async (frameIndex: number) => {
       const canvas = canvasRef.current;
-      if (!canvas || !sourceFrameInfo || !sourceDimensions) return;
+      if (!canvas) return;
 
       currentFrameRef.current = frameIndex;
 
-      // Load frame from cache or OPFS
-      let bitmap = frameCacheRef.current.get(frameIndex);
-      if (!bitmap) {
-        try {
-          if (sourceFrameInfo.sourceType === 'video') {
-            // Load video frame from extracted frames
-            const framePath = getFramePath(
-              sourceFrameInfo.opfsPath,
-              frameIndex,
-              sourceFrameInfo.format as FrameFormat
-            );
-            bitmap = await loadFrameFromOPFS(framePath);
-          } else {
-            // Load image directly from OPFS
-            const imageFile = await opfsManager.getFile(sourceFrameInfo.opfsPath);
-            bitmap = await createImageBitmap(imageFile);
-          }
+      // Determine the input bitmap and dimensions based on source type
+      let bitmap: ImageBitmap | null = null;
+      let inputDimensions: { width: number; height: number } | null = null;
 
-          frameCacheRef.current.set(frameIndex, bitmap);
-
-          // Simple cache limit
-          if (frameCacheRef.current.size > 50) {
-            const firstKey = frameCacheRef.current.keys().next().value;
-            if (firstKey !== undefined) {
-              frameCacheRef.current.get(firstKey)?.close();
-              frameCacheRef.current.delete(firstKey);
-            }
-          }
-        } catch (err) {
-          console.error('[useNodeRenderer] Failed to load frame:', err);
+      if (upstreamChain.hasCompositeSource && compositeSourceId) {
+        // Get rendered output from composite source (merge node)
+        const compositeOutput = getRenderedOutput(compositeSourceId);
+        if (!compositeOutput) {
+          console.warn('[useNodeRenderer] No composite source output available for:', compositeSourceId);
           return;
         }
+        // Check if composite output matches the frame we're trying to render
+        // If not, skip - we'll re-render when the composite source updates
+        if (compositeOutput.frameIndex !== frameIndex) {
+          console.log('[useNodeRenderer] Composite output frame mismatch:', compositeOutput.frameIndex, '!=', frameIndex, '- waiting for update');
+          return;
+        }
+        bitmap = compositeOutput.bitmap;
+        inputDimensions = { width: compositeOutput.width, height: compositeOutput.height };
+      } else if (sourceFrameInfo && sourceDimensions) {
+        // Load frame from primary source (video/image) via cache or OPFS
+        inputDimensions = sourceDimensions;
+        bitmap = frameCacheRef.current.get(frameIndex) ?? null;
+
+        if (!bitmap) {
+          try {
+            if (sourceFrameInfo.sourceType === 'video') {
+              // Load video frame from extracted frames
+              const framePath = getFramePath(
+                sourceFrameInfo.opfsPath,
+                frameIndex,
+                sourceFrameInfo.format as FrameFormat
+              );
+              bitmap = await loadFrameFromOPFS(framePath);
+            } else {
+              // Load image directly from OPFS
+              const imageFile = await opfsManager.getFile(sourceFrameInfo.opfsPath);
+              bitmap = await createImageBitmap(imageFile);
+            }
+
+            frameCacheRef.current.set(frameIndex, bitmap);
+
+            // Simple cache limit
+            if (frameCacheRef.current.size > 50) {
+              const firstKey = frameCacheRef.current.keys().next().value;
+              if (firstKey !== undefined) {
+                frameCacheRef.current.get(firstKey)?.close();
+                frameCacheRef.current.delete(firstKey);
+              }
+            }
+          } catch (err) {
+            console.error('[useNodeRenderer] Failed to load frame:', err);
+            return;
+          }
+        }
+      } else {
+        // No valid source
+        console.warn('[useNodeRenderer] No valid source for node:', nodeId);
+        return;
+      }
+
+      if (!bitmap || !inputDimensions) {
+        return;
       }
 
       // If no effects, just draw directly
       if (upstreamChain.effectConfigs.length === 0) {
         const ctx2d = canvas.getContext('2d');
         if (ctx2d) {
-          canvas.width = sourceDimensions.width;
-          canvas.height = sourceDimensions.height;
+          canvas.width = inputDimensions.width;
+          canvas.height = inputDimensions.height;
           ctx2d.drawImage(bitmap, 0, 0);
+        }
+        // Store rendered output for downstream nodes
+        try {
+          const outputBitmap = await createImageBitmap(canvas);
+          setRenderedOutput(nodeId, outputBitmap, frameIndex);
+        } catch (storeErr) {
+          console.warn('[useNodeRenderer] Failed to store output bitmap:', storeErr);
         }
         return;
       }
 
-      // Initialize GPU if needed
+      // Initialize GPU if needed - pass actual dimensions from input
       if (!isReadyRef.current) {
-        await initGPU();
+        await initGPU(inputDimensions);
       }
 
       const glContext = glContextRef.current;
@@ -239,25 +318,25 @@ export function useNodeRenderer(
         // Fallback to 2D
         const ctx2d = canvas.getContext('2d');
         if (ctx2d) {
-          canvas.width = sourceDimensions.width;
-          canvas.height = sourceDimensions.height;
+          canvas.width = inputDimensions.width;
+          canvas.height = inputDimensions.height;
           ctx2d.drawImage(bitmap, 0, 0);
         }
         return;
       }
 
       try {
-        // Ensure WebGL canvas matches source dimensions
-        if (glCanvas.width !== sourceDimensions.width || glCanvas.height !== sourceDimensions.height) {
-          glCanvas.width = sourceDimensions.width;
-          glCanvas.height = sourceDimensions.height;
+        // Ensure WebGL canvas matches input dimensions
+        if (glCanvas.width !== inputDimensions.width || glCanvas.height !== inputDimensions.height) {
+          glCanvas.width = inputDimensions.width;
+          glCanvas.height = inputDimensions.height;
         }
 
         // Ensure source texture matches dimensions (re-acquire if needed)
         if (sourceTextureRef.current) {
           if (
-            sourceTextureRef.current.width !== sourceDimensions.width ||
-            sourceTextureRef.current.height !== sourceDimensions.height
+            sourceTextureRef.current.width !== inputDimensions.width ||
+            sourceTextureRef.current.height !== inputDimensions.height
           ) {
             pool.release(sourceTextureRef.current);
             sourceTextureRef.current = null;
@@ -266,8 +345,8 @@ export function useNodeRenderer(
 
         if (!sourceTextureRef.current) {
           sourceTextureRef.current = pool.acquire(
-            sourceDimensions.width,
-            sourceDimensions.height,
+            inputDimensions.width,
+            inputDimensions.height,
             'rgba8'
           );
         }
@@ -297,18 +376,26 @@ export function useNodeRenderer(
         );
 
         // Blit to WebGL canvas at full resolution
-        glContext.resize(sourceDimensions.width, sourceDimensions.height);
+        glContext.resize(inputDimensions.width, inputDimensions.height);
         glContext.blitToCanvas(result);
 
         // Transfer to visible canvas (flip Y)
-        canvas.width = sourceDimensions.width;
-        canvas.height = sourceDimensions.height;
+        canvas.width = inputDimensions.width;
+        canvas.height = inputDimensions.height;
         const ctx2d = canvas.getContext('2d');
         if (ctx2d) {
           ctx2d.save();
           ctx2d.scale(1, -1);
           ctx2d.drawImage(glCanvas, 0, -canvas.height, canvas.width, canvas.height);
           ctx2d.restore();
+        }
+
+        // Store rendered output for downstream nodes
+        try {
+          const outputBitmap = await createImageBitmap(canvas);
+          setRenderedOutput(nodeId, outputBitmap, frameIndex);
+        } catch (storeErr) {
+          console.warn('[useNodeRenderer] Failed to store output bitmap:', storeErr);
         }
       } catch (err) {
         console.error('[useNodeRenderer] Render error:', err);
@@ -320,20 +407,21 @@ export function useNodeRenderer(
         }
       }
     },
-    [canvasRef, sourceFrameInfo, sourceDimensions, upstreamChain, initGPU]
+    [canvasRef, nodeId, sourceFrameInfo, sourceDimensions, upstreamChain, compositeSourceId, getRenderedOutput, setRenderedOutput, initGPU]
   );
 
   const getCurrentFrameIndex = useCallback(() => {
     return currentFrameRef.current;
   }, []);
 
-  // Check if source is active at a global frame
+  // Check if node is active at a global frame using layer metadata
   const isActiveAtFrame = useCallback(
     (globalFrame: number): boolean => {
-      const sourceFrame = mapGlobalToSourceFrame(globalFrame);
-      return sourceFrame !== null;
+      if (!effectiveTimeRange) return false;
+      return globalFrame >= effectiveTimeRange.inFrame &&
+             globalFrame < effectiveTimeRange.outFrame;
     },
-    [mapGlobalToSourceFrame]
+    [effectiveTimeRange]
   );
 
   // Render a global frame (maps to source frame, handles inactive)
@@ -359,18 +447,30 @@ export function useNodeRenderer(
     [canvasRef, mapGlobalToSourceFrame, renderFrame]
   );
 
-  // State
-  const state = useMemo<NodeRendererState>(
-    () => ({
+  // State - use composite source data when available and no primary source
+  const state = useMemo<NodeRendererState>(() => {
+    // If we have a composite source with output, use its data
+    const hasCompositeOutput = !!compositeSourceOutput;
+    const compositeDimensions = compositeSourceOutput
+      ? { width: compositeSourceOutput.width, height: compositeSourceOutput.height }
+      : null;
+
+    return {
       isReady: isReadyRef.current,
       hasSource: upstreamChain.isComplete,
       sourceNodeId: upstreamChain.sourceNode?.id ?? null,
-      frameCount: sourceFrameInfo?.frameCount ?? 0,
+      compositeSourceId,
+      hasCompositeSource: upstreamChain.hasCompositeSource,
+      // Frame index of composite source output - changes trigger re-renders in dependent nodes
+      compositeSourceFrameIndex: compositeSourceOutput?.frameIndex ?? null,
+      // Use frameCount=1 for composite sources when output is available
+      frameCount: sourceFrameInfo?.frameCount ?? (hasCompositeOutput ? 1 : 0),
       currentFrameIndex: sourceFrameInfo?.currentFrameIndex ?? 0,
-      dimensions: sourceDimensions,
-    }),
-    [upstreamChain, sourceFrameInfo, sourceDimensions]
-  );
+      // Use composite dimensions when no primary source
+      dimensions: sourceDimensions ?? compositeDimensions,
+      timeRange: effectiveTimeRange,
+    };
+  }, [upstreamChain, sourceFrameInfo, sourceDimensions, effectiveTimeRange, compositeSourceId, compositeSourceOutput]);
 
   const actions = useMemo<NodeRendererActions>(
     () => ({

@@ -6,6 +6,7 @@ import { initialNodes, initialEdges } from '../constants/initialGraphNodes';
 import type { GraphNode, ExtractedFramesInfo } from '../types/nodes';
 import { opfsManager } from '../utils/opfs';
 import { deleteVideoFrames } from '../utils/frame-storage';
+import { invalidateLayerCache, clearLayerCache } from '../utils/layer-metadata';
 
 // Helper function to clean up OPFS file and extracted frames if node has file data
 async function cleanupNodeFile(node: GraphNode): Promise<void> {
@@ -85,11 +86,17 @@ export const useGraphStore = create<GraphState>()(
       // ReactFlow change handlers
       onNodesChange: (changes) => {
         set((state) => {
-          // Find nodes that are being removed
+          // Find nodes that are being removed or modified
           const removedNodeIds = new Set<string>();
+          const changedNodeIds = new Set<string>();
+
           changes.forEach((change) => {
             if (change.type === 'remove') {
               removedNodeIds.add(change.id);
+              changedNodeIds.add(change.id);
+            } else if ('id' in change) {
+              // Any other change type with an ID should invalidate cache
+              changedNodeIds.add(change.id);
             }
           });
 
@@ -102,6 +109,11 @@ export const useGraphStore = create<GraphState>()(
               });
           }
 
+          // Invalidate layer cache for changed nodes
+          changedNodeIds.forEach((nodeId) => {
+            invalidateLayerCache(nodeId, state.nodes, state.edges);
+          });
+
           return {
             nodes: applyNodeChanges(changes, state.nodes) as GraphNode[],
           };
@@ -110,6 +122,21 @@ export const useGraphStore = create<GraphState>()(
       
       onEdgesChange: (changes) => {
         set((state) => {
+          // Collect affected target nodes for cache invalidation
+          const affectedTargets = new Set<string>();
+
+          changes.forEach((change) => {
+            if (change.type === 'add' && 'item' in change) {
+              affectedTargets.add(change.item.target);
+            } else if (change.type === 'remove') {
+              // Find the edge being removed to get its target
+              const edge = state.edges.find((e) => e.id === change.id);
+              if (edge) {
+                affectedTargets.add(edge.target);
+              }
+            }
+          });
+
           const newEdges = applyEdgeChanges(changes, state.edges);
 
           // Enforce single-connection-per-input: keep only the last edge for each target+targetHandle
@@ -128,6 +155,11 @@ export const useGraphStore = create<GraphState>()(
             return seenTargets.get(key) === edge;
           });
 
+          // Invalidate layer cache for affected target nodes
+          affectedTargets.forEach((targetId) => {
+            invalidateLayerCache(targetId, state.nodes, filteredEdges);
+          });
+
           return { edges: filteredEdges };
         });
       },
@@ -138,27 +170,37 @@ export const useGraphStore = create<GraphState>()(
         })),
 
       updateNode: (id, updates) =>
-        set((state) => ({
-          nodes: state.nodes.map((node) => {
-            if (node.id !== id) return node;
-            const resolvedUpdates = typeof updates === 'function' ? updates(node) : updates;
-            return { ...node, ...resolvedUpdates } as GraphNode;
-          }),
-        })),
+        set((state) => {
+          // Invalidate layer cache for this node (updates might change layer metadata)
+          invalidateLayerCache(id, state.nodes, state.edges);
+
+          return {
+            nodes: state.nodes.map((node) => {
+              if (node.id !== id) return node;
+              const resolvedUpdates = typeof updates === 'function' ? updates(node) : updates;
+              return { ...node, ...resolvedUpdates } as GraphNode;
+            }),
+          };
+        }),
 
       replaceNodeType: (id, newType, newData) =>
-        set((state) => ({
-          nodes: state.nodes.map((node) => {
-            if (node.id !== id) return node;
-            // Preserve position, selected state, and other ReactFlow properties
-            // but replace type and data
-            return {
-              ...node,
-              type: newType,
-              data: newData,
-            } as GraphNode;
-          }),
-        })),
+        set((state) => {
+          // Invalidate layer cache for this node (type change affects layer metadata)
+          invalidateLayerCache(id, state.nodes, state.edges);
+
+          return {
+            nodes: state.nodes.map((node) => {
+              if (node.id !== id) return node;
+              // Preserve position, selected state, and other ReactFlow properties
+              // but replace type and data
+              return {
+                ...node,
+                type: newType,
+                data: newData,
+              } as GraphNode;
+            }),
+          };
+        }),
 
       removeNode: (id) =>
         set((state) => {
@@ -186,6 +228,10 @@ export const useGraphStore = create<GraphState>()(
             const eKey = `${e.target}:${e.targetHandle ?? 'default'}`;
             return eKey !== key;
           });
+
+          // Invalidate layer cache for the target node (new connection affects layer metadata)
+          invalidateLayerCache(edge.target, state.nodes, [...filteredEdges, edge]);
+
           return { edges: [...filteredEdges, edge] };
         }),
 
@@ -200,6 +246,9 @@ export const useGraphStore = create<GraphState>()(
           state.nodes.forEach((node) => {
             cleanupNodeFile(node).catch(console.error);
           });
+
+          // Clear the entire layer cache
+          clearLayerCache();
 
           return {
             nodes: initialNodes as GraphNode[],

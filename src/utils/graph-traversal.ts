@@ -13,12 +13,16 @@ import type { GraphNode, EffectConfig, NodeFormat, VideoNodeData, ImageNodeData 
 export interface UpstreamChain {
   // The source node (video/image) that provides frames
   sourceNode: GraphNode | null;
+  // Composite source node (merge) if the chain terminates at one
+  compositeSourceNode: GraphNode | null;
   // Ordered list of effect nodes from source to target
   effectNodes: GraphNode[];
   // Effect configs ready for the render pipeline
   effectConfigs: EffectConfig[];
-  // Whether the chain is complete (has a source)
+  // Whether the chain is complete (has a source or composite source)
   isComplete: boolean;
+  // Whether the source is a composite (merge) rather than a primary source (video/image)
+  hasCompositeSource: boolean;
 }
 
 /**
@@ -36,9 +40,15 @@ const EFFECT_TYPE_MAP: Record<string, string> = {
 const SOURCE_NODE_TYPES = ['video', 'image'];
 
 /**
- * Effect node types that process frames
+ * Composite source types (multi-input nodes that produce a single output)
+ * These are treated as "sources" for downstream nodes - the chain stops here
  */
-const EFFECT_NODE_TYPES = ['blur', 'colorAdjust', 'merge'];
+const COMPOSITE_SOURCE_TYPES = ['merge'];
+
+/**
+ * Effect node types that process frames (single-input pass-through effects)
+ */
+const EFFECT_NODE_TYPES = ['blur', 'colorAdjust'];
 
 /**
  * Multi-input node types (have more than one input handle)
@@ -65,6 +75,7 @@ export function findUpstreamChain(
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   const effectNodes: GraphNode[] = [];
   let sourceNode: GraphNode | null = null;
+  let compositeSourceNode: GraphNode | null = null;
 
   // Start from the given node and walk backwards
   let currentNodeId: string | null = nodeId;
@@ -76,9 +87,15 @@ export function findUpstreamChain(
 
     if (!currentNode) break;
 
-    // Check if this is a source node
+    // Check if this is a source node (video/image)
     if (SOURCE_NODE_TYPES.includes(currentNode.type ?? '')) {
       sourceNode = currentNode;
+      break;
+    }
+
+    // Check if this is a composite source (merge) - treat as terminal
+    if (COMPOSITE_SOURCE_TYPES.includes(currentNode.type ?? '')) {
+      compositeSourceNode = currentNode;
       break;
     }
 
@@ -106,11 +123,15 @@ export function findUpstreamChain(
     };
   });
 
+  const hasCompositeSource = compositeSourceNode !== null;
+
   return {
     sourceNode,
+    compositeSourceNode,
     effectNodes,
     effectConfigs,
-    isComplete: sourceNode !== null,
+    isComplete: sourceNode !== null || compositeSourceNode !== null,
+    hasCompositeSource,
   };
 }
 

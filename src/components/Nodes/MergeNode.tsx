@@ -51,12 +51,15 @@ export function MergeNode(props: NodeProps<MergeNodeType>) {
     canvasRef,
   });
 
-  // Render when selected or timeline changes
+  // Render when timeline changes - merge nodes always need fresh output for downstream nodes
+  // But only update the visible canvas when selected
   useEffect(() => {
     if (!state.hasBothInputs) return;
 
-    if (selected || lastRenderedFrameRef.current === -1) {
-      actions.renderGlobalFrame(currentFrame);
+    // Always compute output on frame change to keep output fresh for downstream nodes
+    // But only update visible canvas when selected
+    if (currentFrame !== lastRenderedFrameRef.current) {
+      actions.renderGlobalFrame(currentFrame, selected);
       lastRenderedFrameRef.current = currentFrame;
     }
   }, [state.hasBothInputs, currentFrame, selected, actions]);
@@ -66,8 +69,8 @@ export function MergeNode(props: NodeProps<MergeNodeType>) {
     if (!state.hasBothInputs) return;
     if (lastRenderedFrameRef.current === -1) return;
 
-    actions.renderGlobalFrame(lastRenderedFrameRef.current);
-  }, [data.parameters.blendMode, data.parameters.opacity, state.hasBothInputs, actions]);
+    actions.renderGlobalFrame(lastRenderedFrameRef.current, selected);
+  }, [data.parameters.blendMode, data.parameters.opacity, state.hasBothInputs, selected, actions]);
 
   const handleBlendModeChange = useCallback(
     (value: string) => {

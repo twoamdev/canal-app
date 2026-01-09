@@ -17,9 +17,11 @@ import {
   getSourceDimensions,
 } from '../utils/graph-traversal';
 import { getSourceFrameForGlobalFrame } from '../utils/node-time';
+import { getEffectiveTimeRange, getLayersAtNode } from '../utils/layer-metadata';
 import { useTimelineStore } from '../stores/timelineStore';
 import { loadFrameFromOPFS, getFramePath, type FrameFormat } from '../utils/frame-storage';
 import { opfsManager } from '../utils/opfs';
+import { useRenderedOutputStore } from '../stores/renderedOutputStore';
 import type { GPUTexture } from '../gpu/types';
 import type { MergeNodeData, MergeBlendMode } from '../types/nodes';
 
@@ -40,10 +42,15 @@ interface MergeNodeRendererState {
   bgDimensions: { width: number; height: number } | null;
   fgDimensions: { width: number; height: number } | null;
   dimensions: { width: number; height: number } | null; // Output = bg
+  /** Union time range from layer metadata (max of all input ranges) */
+  timeRange: { inFrame: number; outFrame: number } | null;
+  /** Number of layers in the stack */
+  layerCount: number;
 }
 
 interface MergeNodeRendererActions {
-  renderGlobalFrame: (globalFrame: number) => Promise<boolean>;
+  /** Render a frame. Set updateCanvas=false to only compute output without updating visible canvas */
+  renderGlobalFrame: (globalFrame: number, updateCanvas?: boolean) => Promise<boolean>;
 }
 
 export function useMergeNodeRenderer(
@@ -73,6 +80,9 @@ export function useMergeNodeRenderer(
   const frameStart = useTimelineStore((state) => state.frameStart);
   const frameEnd = useTimelineStore((state) => state.frameEnd);
 
+  // Rendered output store - for sharing output with downstream nodes
+  const setRenderedOutput = useRenderedOutputStore((state) => state.setOutput);
+
   // Compute upstream chains for both inputs
   const multiChains = useMemo(() => {
     return findMultiInputUpstreamChains(nodeId, nodes, edges);
@@ -101,6 +111,22 @@ export function useMergeNodeRenderer(
   const outputDimensions = useMemo(() => {
     return getMergeOutputDimensions(nodeId, nodes, edges);
   }, [nodeId, nodes, edges]);
+
+  // Get effective time range from layer metadata (union of all input ranges)
+  const effectiveTimeRange = useMemo(() => {
+    return getEffectiveTimeRange(nodeId, nodes, edges, {
+      start: frameStart,
+      end: frameEnd,
+    });
+  }, [nodeId, nodes, edges, frameStart, frameEnd]);
+
+  // Get layer stack info
+  const layerStack = useMemo(() => {
+    return getLayersAtNode(nodeId, nodes, edges, {
+      start: frameStart,
+      end: frameEnd,
+    });
+  }, [nodeId, nodes, edges, frameStart, frameEnd]);
 
   // Get the current node's parameters
   const currentNode = useMemo(() => {
@@ -225,7 +251,7 @@ export function useMergeNodeRenderer(
   );
 
   const renderGlobalFrame = useCallback(
-    async (globalFrame: number): Promise<boolean> => {
+    async (globalFrame: number, updateCanvas: boolean = true): Promise<boolean> => {
       const canvas = canvasRef.current;
       if (!canvas || !bgSourceInfo || !fgSourceInfo || !outputDimensions || !mergeParams) {
         return false;
@@ -279,25 +305,35 @@ export function useMergeNodeRenderer(
       const glCanvas = glCanvasRef.current;
       const pool = texturePoolRef.current;
 
-      // Helper to draw bg directly to canvas (used in multiple places)
-      const drawBgOnly = () => {
-        canvas.width = outputDimensions.width;
-        canvas.height = outputDimensions.height;
-        const ctx2d = canvas.getContext('2d');
-        if (ctx2d) {
-          ctx2d.drawImage(bgBitmap, 0, 0);
+      // Helper to draw bg directly and store output (used in multiple places)
+      const drawBgOnly = async () => {
+        // Store rendered output for downstream nodes (always)
+        try {
+          const outputBitmap = await createImageBitmap(bgBitmap);
+          setRenderedOutput(nodeId, outputBitmap, globalFrame);
+        } catch (err) {
+          console.warn('[useMergeNodeRenderer] Failed to store output bitmap:', err);
+        }
+        // Only update visible canvas if requested
+        if (updateCanvas) {
+          canvas.width = outputDimensions.width;
+          canvas.height = outputDimensions.height;
+          const ctx2d = canvas.getContext('2d');
+          if (ctx2d) {
+            ctx2d.drawImage(bgBitmap, 0, 0);
+          }
         }
       };
 
       if (!glContext || !glCanvas || !pool) {
         // Fallback - just draw bg
-        drawBgOnly();
+        await drawBgOnly();
         return true;
       }
 
       // If fg is not available, just render bg directly (no GPU merge needed)
       if (!fgBitmap || !fgDimensions) {
-        drawBgOnly();
+        await drawBgOnly();
         return true;
       }
 
@@ -378,19 +414,40 @@ export function useMergeNodeRenderer(
           outputTextureRef.current
         );
 
-        // Blit to WebGL canvas
+        // Blit to WebGL canvas (offscreen)
         glContext.resize(outputDimensions.width, outputDimensions.height);
         glContext.blitToCanvas(outputTextureRef.current);
 
-        // Transfer to visible canvas (flip Y)
-        canvas.width = outputDimensions.width;
-        canvas.height = outputDimensions.height;
-        const ctx2d = canvas.getContext('2d');
-        if (ctx2d) {
-          ctx2d.save();
-          ctx2d.scale(1, -1);
-          ctx2d.drawImage(glCanvas, 0, -canvas.height, canvas.width, canvas.height);
-          ctx2d.restore();
+        // Store rendered output for downstream nodes (always - from glCanvas with Y flip)
+        try {
+          // Create a temporary canvas for the flipped output
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = outputDimensions.width;
+          tempCanvas.height = outputDimensions.height;
+          const tempCtx = tempCanvas.getContext('2d');
+          if (tempCtx) {
+            tempCtx.save();
+            tempCtx.scale(1, -1);
+            tempCtx.drawImage(glCanvas, 0, -tempCanvas.height, tempCanvas.width, tempCanvas.height);
+            tempCtx.restore();
+          }
+          const outputBitmap = await createImageBitmap(tempCanvas);
+          setRenderedOutput(nodeId, outputBitmap, globalFrame);
+        } catch (err) {
+          console.warn('[useMergeNodeRenderer] Failed to store output bitmap:', err);
+        }
+
+        // Only update visible canvas if requested
+        if (updateCanvas) {
+          canvas.width = outputDimensions.width;
+          canvas.height = outputDimensions.height;
+          const ctx2d = canvas.getContext('2d');
+          if (ctx2d) {
+            ctx2d.save();
+            ctx2d.scale(1, -1);
+            ctx2d.drawImage(glCanvas, 0, -canvas.height, canvas.width, canvas.height);
+            ctx2d.restore();
+          }
         }
 
         return true;
@@ -398,12 +455,13 @@ export function useMergeNodeRenderer(
         console.error('[useMergeNodeRenderer] Render error:', err);
 
         // Fallback
-        drawBgOnly();
+        await drawBgOnly();
         return true;
       }
     },
     [
       canvasRef,
+      nodeId,
       bgSourceInfo,
       fgSourceInfo,
       bgDimensions,
@@ -416,6 +474,7 @@ export function useMergeNodeRenderer(
       frameEnd,
       loadFrame,
       initGPU,
+      setRenderedOutput,
     ]
   );
 
@@ -429,8 +488,10 @@ export function useMergeNodeRenderer(
       bgDimensions,
       fgDimensions,
       dimensions: outputDimensions,
+      timeRange: effectiveTimeRange,
+      layerCount: layerStack?.length ?? 0,
     }),
-    [bgChain, fgChain, bgDimensions, fgDimensions, outputDimensions]
+    [bgChain, fgChain, bgDimensions, fgDimensions, outputDimensions, effectiveTimeRange, layerStack]
   );
 
   const actions = useMemo<MergeNodeRendererActions>(
