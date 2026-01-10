@@ -37,6 +37,8 @@ export function VideoNode(props: NodeProps<VideoNode>) {
         ? { width: props.data.extractedFrames.width, height: props.data.extractedFrames.height }
         : null);
 
+   
+
     return (
         <BaseNode
             {...props}
