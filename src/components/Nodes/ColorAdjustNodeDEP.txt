@@ -1,14 +1,16 @@
 import { useCallback, useRef, useEffect } from 'react';
 import { BaseNode } from './BaseNode';
 import type { NodeProps } from '@xyflow/react';
-import type { BlurNode as BlurNodeType } from '../../types/nodes';
+import type { ColorAdjustNode as ColorAdjustNodeType } from '../../types/nodes';
 import { useGraphStore } from '../../stores/graphStore';
 import { useNodeRenderer } from '../../hooks/useNodeRenderer';
 import { useTimelineStore } from '../../stores/timelineStore';
 import { Slider } from '@/components/ui/slider';
-import { CircleDot } from 'lucide-react';
+import { Palette } from 'lucide-react';
 
-export function BlurNode(props: NodeProps<BlurNodeType>) {
+export function ColorAdjustNode(props: NodeProps<ColorAdjustNodeType>) {
+  return null;
+
   const updateNode = useGraphStore((state) => state.updateNode);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const lastRenderedFrameRef = useRef<number>(-1);
@@ -27,7 +29,6 @@ export function BlurNode(props: NodeProps<BlurNodeType>) {
   // Render when:
   // 1. Node becomes selected (sync to current frame)
   // 2. Timeline changes while selected
-  // 3. Parameters change while selected
   useEffect(() => {
     if (!state.hasSource || state.frameCount === 0) return;
 
@@ -37,7 +38,7 @@ export function BlurNode(props: NodeProps<BlurNodeType>) {
       actions.renderGlobalFrame(currentFrame);
       lastRenderedFrameRef.current = currentFrame;
     }
-  }, [state.hasSource, state.frameCount, state.compositeSourceFrameIndex, currentFrame, isSelected, props.data.parameters.radius, actions]);
+  }, [state.hasSource, state.frameCount, state.compositeSourceFrameIndex, currentFrame, isSelected, actions]);
 
   // Always re-render when parameters change (even if not selected)
   useEffect(() => {
@@ -46,17 +47,25 @@ export function BlurNode(props: NodeProps<BlurNodeType>) {
 
     // Re-render with last global frame when params change
     actions.renderGlobalFrame(lastRenderedFrameRef.current);
-  }, [props.data.parameters.radius, state.hasSource, state.frameCount, actions]);
+  }, [
+    props.data.parameters.brightness,
+    props.data.parameters.contrast,
+    props.data.parameters.saturation,
+    props.data.parameters.exposure,
+    state.hasSource,
+    state.frameCount,
+    actions,
+  ]);
 
-  // Handle radius change
-  const handleRadiusChange = useCallback(
-    (value: number[]) => {
+  // Generic parameter handler
+  const handleParameterChange = useCallback(
+    (param: keyof typeof props.data.parameters, value: number[]) => {
       updateNode(props.id, () => ({
         data: {
           ...props.data,
           parameters: {
             ...props.data.parameters,
-            radius: value[0],
+            [param]: value[0],
           },
         },
       }));
@@ -64,12 +73,12 @@ export function BlurNode(props: NodeProps<BlurNodeType>) {
     [props.id, props.data, updateNode]
   );
 
-  const radius = props.data.parameters.radius;
+  const { brightness, contrast, saturation, exposure } = props.data.parameters;
 
   return (
     <BaseNode
       {...props}
-      icon={<CircleDot className="w-5 h-5" />}
+      icon={<Palette className="w-5 h-5" />}
       dimensions={state.dimensions}
       variant="default"
     >
@@ -91,18 +100,63 @@ export function BlurNode(props: NodeProps<BlurNodeType>) {
           </div>
         )}
 
-        {/* Radius slider */}
-        <div className="space-y-2">
+        {/* Brightness slider */}
+        <div className="space-y-1">
           <div className="flex items-center justify-between">
-            <span className="font-medium">Radius</span>
-            <span className="tabular-nums">{radius}px</span>
+            <span className="font-medium">Brightness</span>
+            <span className="tabular-nums">{brightness.toFixed(2)}</span>
           </div>
           <Slider
-            value={[radius]}
+            value={[brightness]}
+            min={-1}
+            max={1}
+            step={0.01}
+            onValueChange={(v) => handleParameterChange('brightness', v)}
+          />
+        </div>
+
+        {/* Contrast slider */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="font-medium">Contrast</span>
+            <span className="tabular-nums">{contrast.toFixed(2)}</span>
+          </div>
+          <Slider
+            value={[contrast]}
             min={0}
-            max={50}
-            step={1}
-            onValueChange={handleRadiusChange}
+            max={3}
+            step={0.01}
+            onValueChange={(v) => handleParameterChange('contrast', v)}
+          />
+        </div>
+
+        {/* Saturation slider */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="font-medium">Saturation</span>
+            <span className="tabular-nums">{saturation.toFixed(2)}</span>
+          </div>
+          <Slider
+            value={[saturation]}
+            min={0}
+            max={3}
+            step={0.01}
+            onValueChange={(v) => handleParameterChange('saturation', v)}
+          />
+        </div>
+
+        {/* Exposure slider */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="font-medium">Exposure</span>
+            <span className="tabular-nums">{exposure.toFixed(2)}</span>
+          </div>
+          <Slider
+            value={[exposure]}
+            min={-2}
+            max={2}
+            step={0.01}
+            onValueChange={(v) => handleParameterChange('exposure', v)}
           />
         </div>
       </div>

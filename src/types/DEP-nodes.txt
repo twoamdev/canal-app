@@ -1,6 +1,5 @@
 import type { Node as ReactFlowNode } from '@xyflow/react';
 import type { OPFSFileMetadata } from '../utils/opfs';
-import type { BasePrimitive, ImagePrimitive, VideoPrimitive } from './primitives';
 
 /**
  * Base node data - this is just the DATA part of a node
@@ -8,7 +7,6 @@ import type { BasePrimitive, ImagePrimitive, VideoPrimitive } from './primitives
  */
 export interface BaseNodeData {
   label: string;
-  primitive?: BasePrimitive;
   [key: string]: unknown;
 }
 
@@ -16,6 +14,22 @@ export interface BaseNodeData {
 // Time and Format Types
 // =============================================================================
 
+/**
+ * Node time range - defines when a node is active on the timeline
+ */
+export interface NodeTimeRange {
+  inFrame: number;        // First frame this node is active (inclusive)
+  outFrame: number;       // Last frame this node is active (exclusive)
+  sourceOffset?: number;  // For videos: which source frame maps to inFrame
+}
+
+/**
+ * Node format - defines the output dimensions of a node
+ */
+export interface NodeFormat {
+  width: number;
+  height: number;
+}
 
 /**
  * Extracted frames metadata (persisted)
@@ -43,6 +57,49 @@ export interface EffectConfig {
 // Effect Node Data Types
 // =============================================================================
 
+/**
+ * Base data for all effect nodes
+ */
+export interface EffectNodeData extends BaseNodeData {
+  // Parameters specific to the effect (e.g., { radius: 10 } for blur)
+  parameters: Record<string, number | number[] | boolean | string>;
+}
+
+/**
+ * Blur node data
+ */
+export interface BlurNodeData extends EffectNodeData {
+  parameters: {
+    radius: number;
+  };
+}
+
+/**
+ * Color adjustment node data
+ */
+export interface ColorAdjustNodeData extends EffectNodeData {
+  parameters: {
+    brightness: number;
+    contrast: number;
+    saturation: number;
+    exposure: number;
+  };
+}
+
+/**
+ * Blend modes for merge operations
+ */
+export type MergeBlendMode = 'over' | 'under' | 'add' | 'subtract' | 'screen' | 'overlay';
+
+/**
+ * Merge node data - composites two inputs with blend modes
+ */
+export interface MergeNodeData extends EffectNodeData {
+  parameters: {
+    blendMode: MergeBlendMode;
+    opacity: number;  // 0-1, foreground layer opacity
+  };
+}
 
 /**
  * File node data - base for all file-based nodes
@@ -57,14 +114,17 @@ export interface FileNodeData extends BaseNodeData {
  */
 export interface VideoNodeData extends FileNodeData {
   extractedFrames?: ExtractedFramesInfo;
-  primitive: VideoPrimitive;
+  timeRange?: NodeTimeRange;  // Defaults: { inFrame: 0, outFrame: frameCount, sourceOffset: 0 }
+  format?: NodeFormat;        // Defaults to native video dimensions
 }
 
 /**
  * Image node data - extends file node with image-specific features
  */
 export interface ImageNodeData extends FileNodeData {
-  primitive: ImagePrimitive
+  nativeDimensions?: NodeFormat;  // Native image dimensions (persisted on load)
+  timeRange?: NodeTimeRange;      // Defaults: inherit from global timeline
+  format?: NodeFormat;            // Defaults to nativeDimensions
 }
 
 /**
@@ -73,12 +133,19 @@ export interface ImageNodeData extends FileNodeData {
 export type FileNode = ReactFlowNode<FileNodeData, 'file'>;
 export type VideoNode = ReactFlowNode<VideoNodeData, 'video'>;
 export type ImageNode = ReactFlowNode<ImageNodeData, 'image'>;
+export type BlurNode = ReactFlowNode<BlurNodeData, 'blur'>;
+export type ColorAdjustNode = ReactFlowNode<ColorAdjustNodeData, 'colorAdjust'>;
+export type MergeNode = ReactFlowNode<MergeNodeData, 'merge'>;
 
+/**
+ * Type alias for any node with base data
+ */
+export type CustomNode<T extends BaseNodeData = BaseNodeData> = ReactFlowNode<T>;
 
 /**
  * Union type of all possible node types in the graph
  */
-export type GraphNode = FileNode | VideoNode | ImageNode;
+export type GraphNode = FileNode | VideoNode | ImageNode | BlurNode | ColorAdjustNode | MergeNode;
 
 // Helper type to extract node data type from a node
 export type NodeData<T extends GraphNode> = T extends ReactFlowNode<infer D> ? D : never;
@@ -123,6 +190,49 @@ export const NODE_REGISTRY: NodeTypeDefinition[] = [
     category: 'input',
     acceptsMimeTypes: ['*/*'],
   },
+  // Effect nodes
+  {
+    type: 'blur',
+    label: 'Blur',
+    description: 'Gaussian blur effect',
+    icon: 'CircleDot',
+    category: 'effect',
+    defaultData: {
+      label: 'Blur',
+      parameters: { radius: 10 },
+    },
+  },
+  {
+    type: 'colorAdjust',
+    label: 'Color Adjust',
+    description: 'Brightness, contrast, saturation',
+    icon: 'Palette',
+    category: 'effect',
+    defaultData: {
+      label: 'Color Adjust',
+      parameters: {
+        brightness: 0,
+        contrast: 1,
+        saturation: 1,
+        exposure: 0,
+      },
+    },
+  },
+  {
+    type: 'merge',
+    label: 'Merge',
+    description: 'Combine two layers with blend modes',
+    icon: 'Layers',
+    category: 'effect',
+    defaultData: {
+      label: 'Merge',
+      parameters: {
+        blendMode: 'over',
+        opacity: 1,
+      },
+    },
+  },
+
 ];
 
 /**
@@ -138,7 +248,6 @@ const SUPPORTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg'];
 /**
  * Get the appropriate node type for a given MIME type
  */
-
 export function getNodeTypeForMimeType(mimeType: string): FileBasedNodeType {
   if (mimeType.startsWith('video/')) return 'video';
   if (SUPPORTED_IMAGE_TYPES.includes(mimeType)) return 'image';

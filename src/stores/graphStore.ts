@@ -6,7 +6,7 @@ import { initialNodes, initialEdges } from '../constants/initialGraphNodes';
 import type { GraphNode, ExtractedFramesInfo } from '../types/nodes';
 import { opfsManager } from '../utils/opfs';
 import { deleteVideoFrames } from '../utils/frame-storage';
-import { invalidateLayerCache, clearLayerCache } from '../utils/layer-metadata';
+//import { invalidateLayerCache, clearLayerCache } from '../utils/layer-metadata';
 
 // Helper function to clean up OPFS file and extracted frames if node has file data
 async function cleanupNodeFile(node: GraphNode): Promise<void> {
@@ -111,7 +111,7 @@ export const useGraphStore = create<GraphState>()(
 
           // Invalidate layer cache for changed nodes
           changedNodeIds.forEach((nodeId) => {
-            invalidateLayerCache(nodeId, state.nodes, state.edges);
+           // invalidateLayerCache(nodeId, state.nodes, state.edges);
           });
 
           return {
@@ -157,7 +157,7 @@ export const useGraphStore = create<GraphState>()(
 
           // Invalidate layer cache for affected target nodes
           affectedTargets.forEach((targetId) => {
-            invalidateLayerCache(targetId, state.nodes, filteredEdges);
+            //invalidateLayerCache(targetId, state.nodes, filteredEdges);
           });
 
           return { edges: filteredEdges };
@@ -172,7 +172,7 @@ export const useGraphStore = create<GraphState>()(
       updateNode: (id, updates) =>
         set((state) => {
           // Invalidate layer cache for this node (updates might change layer metadata)
-          invalidateLayerCache(id, state.nodes, state.edges);
+         // invalidateLayerCache(id, state.nodes, state.edges);
 
           return {
             nodes: state.nodes.map((node) => {
@@ -186,7 +186,7 @@ export const useGraphStore = create<GraphState>()(
       replaceNodeType: (id, newType, newData) =>
         set((state) => {
           // Invalidate layer cache for this node (type change affects layer metadata)
-          invalidateLayerCache(id, state.nodes, state.edges);
+          //invalidateLayerCache(id, state.nodes, state.edges);
 
           return {
             nodes: state.nodes.map((node) => {
@@ -230,7 +230,7 @@ export const useGraphStore = create<GraphState>()(
           });
 
           // Invalidate layer cache for the target node (new connection affects layer metadata)
-          invalidateLayerCache(edge.target, state.nodes, [...filteredEdges, edge]);
+         // invalidateLayerCache(edge.target, state.nodes, [...filteredEdges, edge]);
 
           return { edges: [...filteredEdges, edge] };
         }),
@@ -248,7 +248,7 @@ export const useGraphStore = create<GraphState>()(
           });
 
           // Clear the entire layer cache
-          clearLayerCache();
+         // clearLayerCache();
 
           return {
             nodes: initialNodes as GraphNode[],

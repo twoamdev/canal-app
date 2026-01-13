@@ -1,6 +1,6 @@
 import { useEffect, useCallback } from 'react';
 import { Handle, Position, useViewport, useUpdateNodeInternals, useReactFlow, addEdge, type NodeProps } from '@xyflow/react';
-import type { CustomNode, BaseNodeData } from '../../types/nodes';
+import type { BaseNodeData, GraphNode } from '../../types/nodes';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { useGraphStore } from '../../stores/graphStore';
 import { Card } from '@/components/ui/card';
@@ -51,9 +51,7 @@ const variantStyles = {
   },
 };
 
-export function BaseNode<T extends BaseNodeData = BaseNodeData>(
-    props: NodeProps<CustomNode<T>> & BaseNodeCustomProps
-  ) {
+export function BaseNode(props: NodeProps<GraphNode> & BaseNodeCustomProps) {
   const {
     data,
     selected,

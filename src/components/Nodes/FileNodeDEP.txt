@@ -5,6 +5,8 @@ import type { FileNode } from '../../types/nodes';
 import { File } from 'lucide-react';
 
 export function FileNode(props: NodeProps<FileNode>) {
+    return null;
+
     const hasFile = !!props.data.file;
 
     return (

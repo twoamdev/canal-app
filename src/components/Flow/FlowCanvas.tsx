@@ -15,8 +15,8 @@ import { useGraphStore } from '../../stores/graphStore';
 import { useCommandMenuStore } from '../../stores/commandMenuStore';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { NodeCommandMenu } from './NodeCommandMenu';
-import { FileNode, VideoNode, ImageNode, BlurNode, ColorAdjustNode, MergeNode, BaseNode } from '../Nodes';
-import { ZoomInvariantEdge, ZoomInvariantConnectionLine, ClickConnectionLine } from '../Edges';
+import { BaseNode, ImageNode} from '../nodes';
+import { ZoomInvariantEdge, ZoomInvariantConnectionLine, ClickConnectionLine } from '../edges';
 
 // Component to initialize hotkeys inside ReactFlow context
 function CanvasHotkeys() {
@@ -25,7 +25,12 @@ function CanvasHotkeys() {
 }
 
 // Define outside component to prevent recreation on each render
+
 const nodeTypes = {
+    image: ImageNode,
+    default: BaseNode,
+};
+/**const nodeTypes = {
     file: FileNode,
     video: VideoNode,
     image: ImageNode,
@@ -34,6 +39,8 @@ const nodeTypes = {
     merge: MergeNode,
     default: BaseNode,
 };
+ */
+
 
 const edgeTypes = {
     zoomInvariant: ZoomInvariantEdge,

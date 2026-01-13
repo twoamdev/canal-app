@@ -19,6 +19,7 @@ export function FileDropZone({
     placeholder = 'Drop file or click to select',
     convertToSpecificType = false,
 }: FileDropZoneProps) {
+  
     const updateNode = useGraphStore((state) => state.updateNode);
     const replaceNodeType = useGraphStore((state) => state.replaceNodeType);
     const inputRef = useRef<HTMLInputElement>(null);

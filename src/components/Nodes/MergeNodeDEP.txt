@@ -30,6 +30,7 @@ const BLEND_MODE_OPTIONS: { value: MergeBlendMode; label: string }[] = [
 ];
 
 export function MergeNode(props: NodeProps<MergeNodeType>) {
+
   const { id, data, selected } = props;
   const { zoom } = useViewport();
   const updateNodeInternals = useUpdateNodeInternals();

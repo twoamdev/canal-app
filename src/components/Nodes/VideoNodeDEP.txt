@@ -8,6 +8,7 @@ import { useGraphStore } from '../../stores/graphStore';
 import { FileVideo } from 'lucide-react';
 
 export function VideoNode(props: NodeProps<VideoNode>) {
+    
     const updateNode = useGraphStore((state) => state.updateNode);
 
     const handleExtracted = useCallback((info: ExtractedFramesInfo) => {

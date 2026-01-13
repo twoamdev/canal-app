@@ -2,8 +2,8 @@ import { useCallback } from 'react';
 import { useReactFlow, type XYPosition } from '@xyflow/react';
 import { opfsManager } from '../utils/opfs';
 import { useGraphStore } from '../stores/graphStore';
-import type { GraphNode } from '../types/nodes';
-import { getNodeTypeForMimeType } from '../types/nodes';
+import { getNodeTypeForMimeType, type GraphNode } from '../types/nodes.ts';
+import { createPrimitiveFromFile } from '@/factories/primitives/dispatchPrimitive.ts';
 
 export function useDragAndDropFiles() {
 
@@ -24,9 +24,9 @@ export function useDragAndDropFiles() {
           // Get the metadata of the stored file
           const metadata = await opfsManager.getFileMetadata(opfsPath);
 
-          // Determine the appropriate node type based on MIME type
-          const nodeType = getNodeTypeForMimeType(file.type);
+          const primitive = createPrimitiveFromFile(file);
 
+          const nodeType = getNodeTypeForMimeType(file.type);
           // Calculate the offset position for the new node
           const offsetPosition = {
             x: flowPosition.x + (index * 50),
@@ -35,18 +35,20 @@ export function useDragAndDropFiles() {
 
           // Create a new node with the correct type
           const newNode: GraphNode = {
-            id: `${nodeType}-node-${Date.now()}-${index}`,
+            id: `node-${Date.now()}-${index}`,
             type: nodeType,
             position: offsetPosition,
             data: {
               label: file.name,
               file: metadata,
+              primitive: primitive,
             },
+         
           };
 
+          console.log("my primitive data:", primitive);
           // Add the new node to the graph
           addNode(newNode);
-
           return newNode;
         } catch (error) {
           console.error(`Failed to process file ${file.name}:`, error);
