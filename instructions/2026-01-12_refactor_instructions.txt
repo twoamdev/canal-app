@@ -1,0 +1,136 @@
+Currently, we have a lot set up with node types, and using webgl for effects, and zustand keeping track of the graph for state operations. What’s wrong is the bifurcation of types and nodes that we have going on. I want to refactor how we think of and structure types and nodes in the context of this app. 
+
+Lets make a plan to refactor and get rid of any code we need to in order to implement a new plan that will follow this type of type structure. Analyze what i have and make sure images and video assets would still dumux, encode and use the ofps structure like we currently have. 
+
+Also make sure effects are still efficient and utilizing webgl operations. But here’s a fundamental change that I’ve set up that i want you to plan with me and implement:
+
+// --- 1. ASSET DEFINITIONS (The Library) ---
+// Assets are immutable data sources. They live in the 'AssetLibrary'.
+
+type AssetType = 'video' | 'image' | 'shape' | 'composition';
+
+interface BaseAsset {
+  id: string;
+  type: AssetType;
+  name: string;
+  intrinsicWidth: number;
+  intrinsicHeight: number;
+}
+
+interface VideoAsset extends BaseAsset {
+  type: 'video';
+  metadata: {
+    // Reference to the file in OPFS
+    fileHandleId: string; 
+    duration: number;
+    fps: number;
+    videoTrackId: number; // Needed for MP4Box extraction
+    mimeType: string;     // Needed for VideoDecoder config (e.g., "avc1.42E01E")
+    // Optional: Small index for seeking, or pointer to index file
+    frameCount: number;
+  };
+}
+
+interface ShapeAsset extends BaseAsset {
+  type: 'shape';
+  metadata: {
+    pathData: string;   // SVG path d=""
+    fillRule?: 'evenodd' | 'nonzero';
+  };
+}
+
+interface ImageAsset extends BaseAsset {
+  type: 'image';
+  metadata: {
+    fileHandleId: string; // Reference to OPFS
+  };
+}
+
+// THE CONTAINER ASSET (Recursive Composition)
+interface CompositionAsset extends BaseAsset {
+  type: 'composition'; 
+  
+  // The "World" Boundaries
+  dimensions: { width: number; height: number }; 
+  fps: number; 
+
+  // The Sub-Graph State
+  graph: { 
+    nodes: Record<string, SceneNode>; 
+    edges: Connection[]; 
+  }; 
+}
+
+type Asset = VideoAsset | ShapeAsset | ImageAsset | CompositionAsset;
+
+
+// --- 2. LAYER & PROPERTIES ---
+
+interface Transform {
+  position: { x: number; y: number };
+  scale: { x: number; y: number };
+  rotation: number;     
+  opacity: number;
+  anchorPoint: { x: number; y: number }; 
+}
+
+interface Effect {
+  id: string;
+  type: 'blur' | 'color_correct' | 'drop_shadow';
+  isEnabled: boolean;
+  params: Record<string, any>; // Uniforms for WebGL Shaders
+}
+
+interface Layer {
+  assetId: string;       // Pointer to the Asset Library
+  baseTransform: Transform;
+  effects: Effect[];     // In-place stack effects
+}
+
+
+// --- 3. NODE TYPES (The Graph) ---
+
+interface SourceNode {
+  id: string;
+  type: 'source';
+  layer: Layer;
+}
+
+interface OperationNode {
+  id: string;
+  type: 'operation';
+  operationType: 'blur' | 'color_correct' | 'transform';
+  params: Record<string, any>;
+}
+
+type SceneNode = SourceNode | OperationNode;
+
+interface Connection {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string;
+  targetHandle?: string;
+}
+
+
+
+Additional context:
+// --- THE GRAPH —
+The nodes contain layers, and layers have effects applied to them. However, the needs to be a global frame-rate and scene dimensions, which is like the root composition.
+
+So a fundamental change to our current setup, is the graph and zustand state we are running currently, should technically be a Composition asset, as it’ll be the main root composition that holds nodes and all the data.
+
+This will allow proper subcompositing.
+
+Then if i selected a bunch of nodes, i’d be able to containerize them into a composition, that would then keep track of that subset graph.
+
+The reactflow graph should be keeping track of the nodes, so ensure proper references to SceneNodes are made. 
+
+For structuring in react probably need to make a factory for assets, and then dispatch them for creation if that doesn’t already exist.
+
+
+Here’s a summary why i feel we need a connection interface as well:
+Does React Flow "handle" connections? Yes. It handles the Bézier curve math, the click zones, the dragging physics, and the validation.
+Do I need to store them in your CompositionAsset? Absolutely. React Flow is transient. Your CompositionAsset is permanent. If you don't store the edges in your Asset JSON, the graph connections will disappear every time one navigates or saves the project.
+

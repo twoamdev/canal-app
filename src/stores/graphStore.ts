@@ -1,264 +1,525 @@
+/**
+ * Graph Store
+ *
+ * Provides ReactFlow-compatible access to the active composition's graph.
+ * Acts as a bridge between the AssetStore (source of truth) and ReactFlow.
+ */
+
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import type { Edge, NodeChange, EdgeChange } from '@xyflow/react';
-import { applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
-import { initialNodes, initialEdges } from '../constants/initialGraphNodes';
-import type { GraphNode, ExtractedFramesInfo } from '../types/nodes';
-import { opfsManager } from '../utils/opfs';
-import { deleteVideoFrames } from '../utils/frame-storage';
-import { invalidateLayerCache, clearLayerCache } from '../utils/layer-metadata';
+import type { Node as ReactFlowNode, Edge, NodeChange, EdgeChange } from '@xyflow/react';
+import type { SceneNode, SourceNode, OperationNode, Connection } from '../types/scene-graph';
+import {
+  isSourceNode,
+  isOperationNode,
+  generateConnectionId,
+} from '../types/scene-graph';
+import { useAssetStore } from './assetStore';
+import { useCompositionStore } from './compositionStore';
 
-// Helper function to clean up OPFS file and extracted frames if node has file data
-async function cleanupNodeFile(node: GraphNode): Promise<void> {
-  // Check if this is a file node with OPFS path
-  if ('file' in node.data && node.data.file && typeof node.data.file === 'object') {
-    const fileData = node.data.file as { opfsPath?: string };
-    const extractedFrames = (node.data as { extractedFrames?: ExtractedFramesInfo }).extractedFrames;
+// =============================================================================
+// Types
+// =============================================================================
 
-    // Delete extracted frames if they exist
-    if (fileData.opfsPath && extractedFrames) {
-      try {
-        await deleteVideoFrames(fileData.opfsPath, extractedFrames.frameCount, extractedFrames.format);
-        console.log(`Deleted ${extractedFrames.frameCount} extracted frames for: ${fileData.opfsPath}`);
-      } catch (error) {
-        console.error(`Failed to delete extracted frames for ${fileData.opfsPath}:`, error);
-      }
-    }
+/** ReactFlow node with SceneNode data */
+export type FlowNode = ReactFlowNode<SceneNode>;
 
-    // Delete original file
-    if (fileData.opfsPath) {
-      try {
-        await opfsManager.deleteFile(fileData.opfsPath);
-        console.log(`Deleted OPFS file: ${fileData.opfsPath}`);
-      } catch (error) {
-        console.error(`Failed to delete OPFS file ${fileData.opfsPath}:`, error);
-        // Don't throw - allow node deletion even if file cleanup fails
-      }
-    }
+/** Data types for each node type */
+export type SourceNodeData = SourceNode;
+export type OperationNodeData = OperationNode;
+
+interface GraphState {
+  // ==========================================================================
+  // Computed State (derived from active composition)
+  // ==========================================================================
+
+  /** Get nodes in ReactFlow format */
+  getNodes: () => FlowNode[];
+
+  /** Get edges in ReactFlow format */
+  getEdges: () => Edge[];
+
+  /** Get the raw scene graph */
+  getSceneGraph: () => { nodes: Record<string, SceneNode>; edges: Connection[] } | null;
+
+  // ==========================================================================
+  // Node Operations
+  // ==========================================================================
+
+  /** Add a node to the active composition */
+  addNode: (node: SceneNode) => void;
+
+  /** Update a node in the active composition */
+  updateNode: (
+    id: string,
+    updates: Partial<SceneNode> | ((node: SceneNode) => Partial<SceneNode>)
+  ) => void;
+
+  /** Remove a node from the active composition */
+  removeNode: (id: string) => Promise<void>;
+
+  // ==========================================================================
+  // Edge Operations
+  // ==========================================================================
+
+  /** Add an edge to the active composition */
+  addEdge: (edge: Edge) => void;
+
+  /** Remove an edge from the active composition */
+  removeEdge: (id: string) => void;
+
+  // ==========================================================================
+  // ReactFlow Integration
+  // ==========================================================================
+
+  /** Handle ReactFlow node changes */
+  onNodesChange: (changes: NodeChange<FlowNode>[]) => void;
+
+  /** Handle ReactFlow edge changes */
+  onEdgesChange: (changes: EdgeChange[]) => void;
+
+  // ==========================================================================
+  // Bulk Operations
+  // ==========================================================================
+
+  /** Clear the entire graph */
+  clearGraph: () => Promise<void>;
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/**
+ * Get the active composition ID
+ */
+function getActiveCompositionId(): string | null {
+  return useCompositionStore.getState().activeCompositionId;
+}
+
+/**
+ * Get the active composition's graph
+ */
+function getActiveGraph(): { nodes: Record<string, SceneNode>; edges: Connection[] } | null {
+  return useCompositionStore.getState().getActiveGraph();
+}
+
+/**
+ * Clean up OPFS files for a source node's asset
+ */
+async function cleanupSourceNodeAsset(node: SourceNode): Promise<void> {
+  const assetStore = useAssetStore.getState();
+  const asset = assetStore.getAsset(node.layer.assetId);
+
+  if (!asset) return;
+
+  // Check if any other source nodes reference this asset
+  const compositionId = getActiveCompositionId();
+  if (!compositionId) return;
+
+  const graph = getActiveGraph();
+  if (!graph) return;
+
+  const otherReferences = Object.values(graph.nodes).filter(
+    (n) =>
+      n.id !== node.id &&
+      isSourceNode(n) &&
+      n.layer.assetId === node.layer.assetId
+  );
+
+  // Only delete asset if no other references
+  if (otherReferences.length === 0) {
+    await assetStore.removeAsset(node.layer.assetId);
   }
 }
 
-interface GraphState {
-  nodes: GraphNode[];
-  edges: Edge[];
-
-  setNodes: (nodes: GraphNode[]) => void;
-  setEdges: (edges: Edge[]) => void;
-  onNodesChange: (changes: NodeChange[]) => void;
-  onEdgesChange: (changes: EdgeChange[]) => void;
-  addNode: (node: GraphNode) => void;
-  updateNode: (id: string, updates: Partial<GraphNode> | ((node: GraphNode) => Partial<GraphNode>)) => void;
-  replaceNodeType: (id: string, newType: string, newData: Record<string, unknown>) => void;
-  removeNode: (id: string) => void;
-  addEdge: (edge: Edge) => void;
-  removeEdge: (id: string) => void;
-  clearGraph: () => void;
+/**
+ * Convert SceneNode to ReactFlow node
+ */
+function sceneNodeToFlowNode(node: SceneNode): FlowNode {
+  return {
+    id: node.id,
+    type: node.type,
+    position: node.position ?? { x: 0, y: 0 },
+    data: node,
+    selected: node.selected ?? false,
+    dragging: false,
+    draggable: true,
+    selectable: true,
+    connectable: true,
+  };
 }
 
-export const useGraphStore = create<GraphState>()(
-  persist(
-    (set) => ({
-      // Initial state
-      nodes: initialNodes as GraphNode[],
-      edges: initialEdges,
+/**
+ * Convert Connection to ReactFlow edge
+ */
+function connectionToFlowEdge(conn: Connection): Edge {
+  return {
+    id: conn.id,
+    source: conn.source,
+    target: conn.target,
+    sourceHandle: conn.sourceHandle,
+    targetHandle: conn.targetHandle,
+  };
+}
 
-      // Actions
-      setNodes: (nodes) => set({ nodes }),
-      setEdges: (edges) => {
-        // Enforce single-connection-per-input: keep only the last edge for each target+targetHandle
-        const seenTargets = new Map<string, Edge>();
-        // Process in reverse so the "last" (newest) edge wins
-        for (let i = edges.length - 1; i >= 0; i--) {
-          const edge = edges[i];
-          const key = `${edge.target}:${edge.targetHandle ?? 'default'}`;
-          if (!seenTargets.has(key)) {
-            seenTargets.set(key, edge);
-          }
-        }
-        // Restore original order
-        const filteredEdges = edges.filter((edge) => {
-          const key = `${edge.target}:${edge.targetHandle ?? 'default'}`;
-          return seenTargets.get(key) === edge;
-        });
-        set({ edges: filteredEdges });
-      },
-      
-      // ReactFlow change handlers
-      onNodesChange: (changes) => {
-        set((state) => {
-          // Find nodes that are being removed or modified
-          const removedNodeIds = new Set<string>();
-          const changedNodeIds = new Set<string>();
+// =============================================================================
+// Store
+// =============================================================================
 
-          changes.forEach((change) => {
-            if (change.type === 'remove') {
-              removedNodeIds.add(change.id);
-              changedNodeIds.add(change.id);
-            } else if ('id' in change) {
-              // Any other change type with an ID should invalidate cache
-              changedNodeIds.add(change.id);
-            }
-          });
+export const useGraphStore = create<GraphState>()(() => ({
+  // ==========================================================================
+  // Computed State
+  // ==========================================================================
 
-          // Clean up OPFS files for removed nodes
-          if (removedNodeIds.size > 0) {
-            state.nodes
-              .filter((node) => removedNodeIds.has(node.id))
-              .forEach((node) => {
-                cleanupNodeFile(node).catch(console.error);
-              });
-          }
+  getNodes: () => {
+    const graph = getActiveGraph();
+    if (!graph) return [];
 
-          // Invalidate layer cache for changed nodes
-          changedNodeIds.forEach((nodeId) => {
-            invalidateLayerCache(nodeId, state.nodes, state.edges);
-          });
+    return Object.values(graph.nodes).map(sceneNodeToFlowNode);
+  },
 
-          return {
-            nodes: applyNodeChanges(changes, state.nodes) as GraphNode[],
-          };
-        });
-      },
-      
-      onEdgesChange: (changes) => {
-        set((state) => {
-          // Collect affected target nodes for cache invalidation
-          const affectedTargets = new Set<string>();
+  getEdges: () => {
+    const graph = getActiveGraph();
+    if (!graph) return [];
 
-          changes.forEach((change) => {
-            if (change.type === 'add' && 'item' in change) {
-              affectedTargets.add(change.item.target);
-            } else if (change.type === 'remove') {
-              // Find the edge being removed to get its target
-              const edge = state.edges.find((e) => e.id === change.id);
-              if (edge) {
-                affectedTargets.add(edge.target);
-              }
-            }
-          });
+    return graph.edges.map(connectionToFlowEdge);
+  },
 
-          const newEdges = applyEdgeChanges(changes, state.edges);
+  getSceneGraph: () => {
+    return getActiveGraph();
+  },
 
-          // Enforce single-connection-per-input: keep only the last edge for each target+targetHandle
-          const seenTargets = new Map<string, Edge>();
-          // Process in reverse so the "last" (newest) edge wins
-          for (let i = newEdges.length - 1; i >= 0; i--) {
-            const edge = newEdges[i];
-            const key = `${edge.target}:${edge.targetHandle ?? 'default'}`;
-            if (!seenTargets.has(key)) {
-              seenTargets.set(key, edge);
-            }
-          }
-          // Restore original order
-          const filteredEdges = newEdges.filter((edge) => {
-            const key = `${edge.target}:${edge.targetHandle ?? 'default'}`;
-            return seenTargets.get(key) === edge;
-          });
+  // ==========================================================================
+  // Node Operations
+  // ==========================================================================
 
-          // Invalidate layer cache for affected target nodes
-          affectedTargets.forEach((targetId) => {
-            invalidateLayerCache(targetId, state.nodes, filteredEdges);
-          });
-
-          return { edges: filteredEdges };
-        });
-      },
-      
-      addNode: (node) =>
-        set((state) => ({
-          nodes: [...state.nodes, node],
-        })),
-
-      updateNode: (id, updates) =>
-        set((state) => {
-          // Invalidate layer cache for this node (updates might change layer metadata)
-          invalidateLayerCache(id, state.nodes, state.edges);
-
-          return {
-            nodes: state.nodes.map((node) => {
-              if (node.id !== id) return node;
-              const resolvedUpdates = typeof updates === 'function' ? updates(node) : updates;
-              return { ...node, ...resolvedUpdates } as GraphNode;
-            }),
-          };
-        }),
-
-      replaceNodeType: (id, newType, newData) =>
-        set((state) => {
-          // Invalidate layer cache for this node (type change affects layer metadata)
-          invalidateLayerCache(id, state.nodes, state.edges);
-
-          return {
-            nodes: state.nodes.map((node) => {
-              if (node.id !== id) return node;
-              // Preserve position, selected state, and other ReactFlow properties
-              // but replace type and data
-              return {
-                ...node,
-                type: newType,
-                data: newData,
-              } as GraphNode;
-            }),
-          };
-        }),
-
-      removeNode: (id) =>
-        set((state) => {
-          // Find the node being removed
-          const nodeToRemove = state.nodes.find((node) => node.id === id);
-          
-          // Clean up OPFS file if it's a file node
-          if (nodeToRemove) {
-            cleanupNodeFile(nodeToRemove).catch(console.error);
-          }
-
-          return {
-            nodes: state.nodes.filter((node) => node.id !== id),
-            edges: state.edges.filter(
-              (edge) => edge.source !== id && edge.target !== id
-            ),
-          };
-        }),
-
-      addEdge: (edge) =>
-        set((state) => {
-          // Remove any existing edge to the same target+targetHandle (single connection per input)
-          const key = `${edge.target}:${edge.targetHandle ?? 'default'}`;
-          const filteredEdges = state.edges.filter((e) => {
-            const eKey = `${e.target}:${e.targetHandle ?? 'default'}`;
-            return eKey !== key;
-          });
-
-          // Invalidate layer cache for the target node (new connection affects layer metadata)
-          invalidateLayerCache(edge.target, state.nodes, [...filteredEdges, edge]);
-
-          return { edges: [...filteredEdges, edge] };
-        }),
-
-      removeEdge: (id) =>
-        set((state) => ({
-          edges: state.edges.filter((edge) => edge.id !== id),
-        })),
-
-      clearGraph: () =>
-        set((state) => {
-          // Clean up all file nodes' OPFS storage
-          state.nodes.forEach((node) => {
-            cleanupNodeFile(node).catch(console.error);
-          });
-
-          // Clear the entire layer cache
-          clearLayerCache();
-
-          return {
-            nodes: initialNodes as GraphNode[],
-            edges: initialEdges,
-          };
-        }),
-    }),
-    {
-      name: 'canal-graph-storage',
-      version: 1,
+  addNode: (node) => {
+    const compositionId = getActiveCompositionId();
+    if (!compositionId) {
+      console.warn('No active composition to add node to');
+      return;
     }
-  )
-);
+
+    useAssetStore.getState().addNodeToComposition(compositionId, node);
+  },
+
+  updateNode: (id, updates) => {
+    const compositionId = getActiveCompositionId();
+    if (!compositionId) return;
+
+    const graph = getActiveGraph();
+    if (!graph) return;
+
+    const existingNode = graph.nodes[id];
+    if (!existingNode) return;
+
+    const resolvedUpdates =
+      typeof updates === 'function' ? updates(existingNode) : updates;
+
+    useAssetStore
+      .getState()
+      .updateNodeInComposition(compositionId, id, resolvedUpdates);
+  },
+
+  removeNode: async (id) => {
+    const compositionId = getActiveCompositionId();
+    if (!compositionId) return;
+
+    const graph = getActiveGraph();
+    if (!graph) return;
+
+    const node = graph.nodes[id];
+    if (!node) return;
+
+    // Clean up asset if this is a source node
+    if (isSourceNode(node)) {
+      await cleanupSourceNodeAsset(node);
+    }
+
+    useAssetStore.getState().removeNodeFromComposition(compositionId, id);
+  },
+
+  // ==========================================================================
+  // Edge Operations
+  // ==========================================================================
+
+  addEdge: (edge) => {
+    const compositionId = getActiveCompositionId();
+    if (!compositionId) return;
+
+    const connection: Connection = {
+      id: edge.id || generateConnectionId(),
+      source: edge.source,
+      target: edge.target,
+      sourceHandle: edge.sourceHandle ?? undefined,
+      targetHandle: edge.targetHandle ?? undefined,
+    };
+
+    useAssetStore.getState().addEdgeToComposition(compositionId, connection);
+
+    // Update the source node's layer.effects array if connecting to an operation
+    const graph = getActiveGraph();
+    if (graph) {
+      const sourceNode = graph.nodes[edge.source];
+      const targetNode = graph.nodes[edge.target];
+
+      if (isSourceNode(sourceNode) && isOperationNode(targetNode)) {
+        // Add the operation to the source's effects tracking
+        const newEffects = [...sourceNode.layer.effects, targetNode.id];
+        useAssetStore.getState().updateNodeInComposition(compositionId, edge.source, {
+          layer: {
+            ...sourceNode.layer,
+            effects: newEffects,
+          },
+        } as Partial<SourceNode>);
+      }
+    }
+  },
+
+  removeEdge: (id) => {
+    const compositionId = getActiveCompositionId();
+    if (!compositionId) return;
+
+    // Find the edge before removing to update layer.effects
+    const graph = getActiveGraph();
+    if (graph) {
+      const edge = graph.edges.find((e) => e.id === id);
+      if (edge) {
+        const sourceNode = graph.nodes[edge.source];
+        const targetNode = graph.nodes[edge.target];
+
+        if (isSourceNode(sourceNode) && isOperationNode(targetNode)) {
+          // Remove the operation from the source's effects tracking
+          const newEffects = sourceNode.layer.effects.filter(
+            (effectId) => effectId !== targetNode.id
+          );
+          useAssetStore.getState().updateNodeInComposition(compositionId, edge.source, {
+            layer: {
+              ...sourceNode.layer,
+              effects: newEffects,
+            },
+          } as Partial<SourceNode>);
+        }
+      }
+    }
+
+    useAssetStore.getState().removeEdgeFromComposition(compositionId, id);
+  },
+
+  // ==========================================================================
+  // ReactFlow Integration
+  // ==========================================================================
+
+  onNodesChange: (changes) => {
+    const compositionId = getActiveCompositionId();
+    if (!compositionId) return;
+
+    const graph = getActiveGraph();
+    if (!graph) return;
+
+    // Process each change
+    for (const change of changes) {
+      switch (change.type) {
+        case 'position':
+          if (change.position) {
+            const node = graph.nodes[change.id];
+            if (node) {
+              useAssetStore
+                .getState()
+                .updateNodeInComposition(compositionId, change.id, {
+                  position: change.position,
+                });
+            }
+          }
+          break;
+
+        case 'select':
+          useAssetStore
+            .getState()
+            .updateNodeInComposition(compositionId, change.id, {
+              selected: change.selected,
+            });
+          break;
+
+        case 'remove':
+          // Handle async cleanup
+          const nodeToRemove = graph.nodes[change.id];
+          if (nodeToRemove && isSourceNode(nodeToRemove)) {
+            cleanupSourceNodeAsset(nodeToRemove).catch(console.error);
+          }
+          useAssetStore
+            .getState()
+            .removeNodeFromComposition(compositionId, change.id);
+          break;
+
+        case 'dimensions':
+          // ReactFlow dimension updates - can ignore for scene graph
+          break;
+
+        case 'add':
+          // Node additions should go through addNode
+          break;
+      }
+    }
+  },
+
+  onEdgesChange: (changes) => {
+    const compositionId = getActiveCompositionId();
+    if (!compositionId) return;
+
+    const assetStore = useAssetStore.getState();
+
+    for (const change of changes) {
+      switch (change.type) {
+        case 'add':
+          if ('item' in change && change.item) {
+            const edge = change.item;
+            const connection: Connection = {
+              id: edge.id || generateConnectionId(),
+              source: edge.source,
+              target: edge.target,
+              sourceHandle: edge.sourceHandle ?? undefined,
+              targetHandle: edge.targetHandle ?? undefined,
+            };
+            assetStore.addEdgeToComposition(compositionId, connection);
+          }
+          break;
+
+        case 'remove':
+          assetStore.removeEdgeFromComposition(compositionId, change.id);
+          break;
+
+        case 'select':
+          // Edge selection - not stored in scene graph
+          break;
+      }
+    }
+  },
+
+  // ==========================================================================
+  // Bulk Operations
+  // ==========================================================================
+
+  clearGraph: async () => {
+    const compositionId = getActiveCompositionId();
+    if (!compositionId) return;
+
+    const graph = getActiveGraph();
+    if (!graph) return;
+
+    // Clean up all source node assets
+    const sourceNodes = Object.values(graph.nodes).filter(isSourceNode);
+    for (const node of sourceNodes) {
+      await cleanupSourceNodeAsset(node);
+    }
+
+    // Clear the graph
+    useAssetStore
+      .getState()
+      .updateCompositionGraph(compositionId, {}, []);
+  },
+}));
+
+// =============================================================================
+// Selectors
+// =============================================================================
+
+/**
+ * Select nodes as ReactFlow format
+ */
+export const selectNodes = (): FlowNode[] => {
+  return useGraphStore.getState().getNodes();
+};
+
+/**
+ * Select edges as ReactFlow format
+ */
+export const selectEdges = (): Edge[] => {
+  return useGraphStore.getState().getEdges();
+};
+
+/**
+ * Select a specific node by ID
+ */
+export const selectNode = (id: string): SceneNode | undefined => {
+  const graph = useGraphStore.getState().getSceneGraph();
+  return graph?.nodes[id];
+};
+
+/**
+ * Select source nodes only
+ */
+export const selectSourceNodes = (): SourceNode[] => {
+  const graph = useGraphStore.getState().getSceneGraph();
+  if (!graph) return [];
+  return Object.values(graph.nodes).filter(isSourceNode);
+};
+
+/**
+ * Select operation nodes only
+ */
+export const selectOperationNodes = (): OperationNode[] => {
+  const graph = useGraphStore.getState().getSceneGraph();
+  if (!graph) return [];
+  return Object.values(graph.nodes).filter(isOperationNode);
+};
+
+// =============================================================================
+// Hooks for ReactFlow Integration
+// =============================================================================
+
+/**
+ * Hook to get nodes with automatic updates
+ * Properly subscribes to asset store changes to trigger re-renders
+ */
+export function useGraphNodes(): FlowNode[] {
+  // Subscribe to active composition ID
+  const activeCompId = useCompositionStore((s) => s.activeCompositionId);
+
+  // Subscribe to the specific composition's graph in the asset store
+  const composition = useAssetStore((s) => {
+    if (!activeCompId) return null;
+    const asset = s.assets[activeCompId];
+    if (asset && asset.type === 'composition') {
+      return asset;
+    }
+    return null;
+  });
+
+  if (!composition || composition.type !== 'composition') return [];
+
+  // Convert nodes with proper defaults for ReactFlow
+  return Object.values(composition.graph.nodes).map((node) => ({
+    id: node.id,
+    type: node.type,
+    position: node.position ?? { x: 0, y: 0 },
+    data: node,
+    selected: node.selected ?? false,
+    dragging: false,
+    draggable: true,
+    selectable: true,
+    connectable: true,
+  }));
+}
+
+/**
+ * Hook to get edges with automatic updates
+ */
+export function useGraphEdges(): Edge[] {
+  // Subscribe to active composition ID
+  const activeCompId = useCompositionStore((s) => s.activeCompositionId);
+
+  // Subscribe to the specific composition's graph in the asset store
+  const composition = useAssetStore((s) => {
+    if (!activeCompId) return null;
+    const asset = s.assets[activeCompId];
+    if (asset && asset.type === 'composition') {
+      return asset;
+    }
+    return null;
+  });
+
+  if (!composition || composition.type !== 'composition') return [];
+
+  return composition.graph.edges.map(connectionToFlowEdge);
+}

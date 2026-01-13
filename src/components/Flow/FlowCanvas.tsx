@@ -1,22 +1,23 @@
 import { useCallback, useEffect } from 'react'
 import {
     ReactFlow,
-    addEdge,
     SelectionMode,
     useReactFlow,
     type OnConnect,
     type Node,
+    type OnNodesChange,
+    type OnEdgesChange,
     Background,
-    Controls,
 } from '@xyflow/react'
 import { useDragAndDropFiles } from '../../hooks/useDragAndDropFiles';
 import { useCanvasHotkeys } from '../../hooks/useCanvasHotkeys';
-import { useGraphStore } from '../../stores/graphStore';
+import { useGraphStore, useGraphNodes, useGraphEdges } from '../../stores/graphStore';
+import { initializeCompositionSystem } from '../../stores/compositionStore';
 import { useCommandMenuStore } from '../../stores/commandMenuStore';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { NodeCommandMenu } from './NodeCommandMenu';
-import { FileNode, VideoNode, ImageNode, BlurNode, ColorAdjustNode, MergeNode, BaseNode } from '../Nodes';
-import { ZoomInvariantEdge, ZoomInvariantConnectionLine, ClickConnectionLine } from '../Edges';
+import { SourceNodeComponent, OperationNodeComponent, BaseNode } from '../nodes';
+import { ZoomInvariantEdge, ZoomInvariantConnectionLine, ClickConnectionLine } from '../edges';
 
 // Component to initialize hotkeys inside ReactFlow context
 function CanvasHotkeys() {
@@ -24,14 +25,11 @@ function CanvasHotkeys() {
     return null;
 }
 
-// Define outside component to prevent recreation on each render
+// Define node types for new architecture
 const nodeTypes = {
-    file: FileNode,
-    video: VideoNode,
-    image: ImageNode,
-    blur: BlurNode,
-    colorAdjust: ColorAdjustNode,
-    merge: MergeNode,
+    source: SourceNodeComponent,
+    operation: OperationNodeComponent,
+    // Legacy fallback
     default: BaseNode,
 };
 
@@ -44,10 +42,17 @@ const defaultEdgeOptions = {
 };
 
 export function FlowCanvas() {
-    // Get state and actions from Zustand store
-    const nodes = useGraphStore((state) => state.nodes);
-    const edges = useGraphStore((state) => state.edges);
-    const setEdges = useGraphStore((state) => state.setEdges);
+    // Initialize composition system on mount
+    useEffect(() => {
+        initializeCompositionSystem();
+    }, []);
+
+    // Get nodes and edges from the new graph hooks
+    const nodes = useGraphNodes();
+    const edges = useGraphEdges();
+
+    // Get actions from graph store
+    const addEdgeAction = useGraphStore((state) => state.addEdge);
     const onNodesChange = useGraphStore((state) => state.onNodesChange);
     const onEdgesChange = useGraphStore((state) => state.onEdgesChange);
 
@@ -108,15 +113,15 @@ export function FlowCanvas() {
 
     const onConnect: OnConnect = useCallback(
         (params) => {
-            // Remove any existing edge connected to the same target handle
-            // (each input can only have one connection)
-            const filteredEdges = edges.filter(
-                (edge) => !(edge.target === params.target && edge.targetHandle === params.targetHandle)
-            );
-            const newEdges = addEdge(params, filteredEdges);
-            setEdges(newEdges);
+            addEdgeAction({
+                id: `edge_${Date.now()}`,
+                source: params.source,
+                target: params.target,
+                sourceHandle: params.sourceHandle,
+                targetHandle: params.targetHandle,
+            });
         },
-        [edges, setEdges]
+        [addEdgeAction]
     );
 
     const onDrop = useCallback(
@@ -138,14 +143,14 @@ export function FlowCanvas() {
             onMouseMove={handleMouseMove}
         >
             <ReactFlow
-                nodes={nodes}
+                nodes={nodes as Node[]}
                 edges={edges}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
                 defaultEdgeOptions={defaultEdgeOptions}
                 connectionLineComponent={ZoomInvariantConnectionLine}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
+                onNodesChange={onNodesChange as OnNodesChange}
+                onEdgesChange={onEdgesChange as OnEdgesChange}
                 onConnect={onConnect}
                 onNodeDoubleClick={onNodeDoubleClick}
                 onPaneClick={handlePaneClick}
@@ -159,8 +164,7 @@ export function FlowCanvas() {
                 proOptions={{ hideAttribution: true }}
             >
                 <CanvasHotkeys />
-                <Controls className="!bg-card !border-border !shadow-md [&>button]:!bg-card [&>button]:!border-border [&>button]:!text-foreground [&>button:hover]:!bg-muted" />
-                <Background color="hsl(var(--muted-foreground) / 0.3)" gap={20} />
+               <Background color="hsl(var(--muted-foreground) / 0.3)" gap={20} />
                 <NodeCommandMenu
                     open={commandMenuOpen}
                     onOpenChange={handleCommandMenuOpenChange}

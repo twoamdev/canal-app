@@ -1,0 +1,446 @@
+Refactor Plan: Asset/Layer/Node Architecture
+
+ Overview
+
+ Refactor Canal from its current node-centric architecture to a clean Asset/Layer/Node architecture that separates immutable data sources (Assets) from their visual representations (Layers) and processing
+ operations (Nodes).
+
+ Key Changes:
+ - Assets are immutable data sources stored in an AssetLibrary
+ - The root graph becomes a CompositionAsset (enables future subcompositions)
+ - Two node types: SourceNode (contains Layer → references Asset) and OperationNode (effects)
+ - Remove old node types: VideoNode, ImageNode, FileNode, BlurNode, ColorAdjustNode, MergeNode
+ - Defer merge/compositing to a later phase
+
+ ---
+ Phase 1: Core Type Definitions
+
+ Create /src/types/assets.ts
+
+ // Asset types
+ type AssetType = 'video' | 'image' | 'shape' | 'composition';
+
+ interface BaseAsset {
+   id: string;
+   type: AssetType;
+   name: string;
+   intrinsicWidth: number;
+   intrinsicHeight: number;
+ }
+
+ interface VideoAsset extends BaseAsset {
+   type: 'video';
+   metadata: {
+     fileHandleId: string;  // OPFS path
+     duration: number;
+     fps: number;
+     videoTrackId: number;
+     mimeType: string;
+     frameCount: number;
+   };
+ }
+
+ interface ImageAsset extends BaseAsset {
+   type: 'image';
+   metadata: {
+     fileHandleId: string;  // OPFS path
+   };
+ }
+
+ interface ShapeAsset extends BaseAsset {
+   type: 'shape';
+   metadata: {
+     pathData: string;
+     fillRule?: 'evenodd' | 'nonzero';
+   };
+ }
+
+ interface CompositionAsset extends BaseAsset {
+   type: 'composition';
+   dimensions: { width: number; height: number };
+   fps: number;
+   graph: {
+     nodes: Record<string, SceneNode>;
+     edges: Connection[];
+   };
+ }
+
+ type Asset = VideoAsset | ImageAsset | ShapeAsset | CompositionAsset;
+
+ Create /src/types/scene-graph.ts
+
+ // Transform applied to layers
+ interface Transform {
+   position: { x: number; y: number };
+   scale: { x: number; y: number };
+   rotation: number;
+   opacity: number;
+   anchorPoint: { x: number; y: number };
+ }
+
+ // Layer references an asset with transform and effect tracking
+ interface Layer {
+   assetId: string;
+   baseTransform: Transform;
+   effects: string[];  // IDs of connected OperationNodes
+ }
+
+ // Source node contains a layer
+ interface SourceNode {
+   id: string;
+   type: 'source';
+   position: { x: number; y: number };  // ReactFlow position
+   layer: Layer;
+ }
+
+ // Operation node applies an effect
+ type OperationType = 'blur' | 'color_correct' | 'transform';
+
+ interface OperationNode {
+   id: string;
+   type: 'operation';
+   position: { x: number; y: number };
+   operationType: OperationType;
+   params: Record<string, number | boolean | string>;
+   isEnabled: boolean;
+ }
+
+ type SceneNode = SourceNode | OperationNode;
+
+ // Connection between nodes
+ interface Connection {
+   id: string;
+   source: string;
+   target: string;
+   sourceHandle?: string;
+   targetHandle?: string;
+ }
+
+ ---
+ Phase 2: Asset Management Store
+
+ Create /src/stores/assetStore.ts
+
+ interface AssetState {
+   assets: Record<string, Asset>;
+   rootCompositionId: string | null;
+
+   // Asset CRUD
+   addAsset: (asset: Asset) => void;
+   updateAsset: (id: string, updates: Partial<Asset>) => void;
+   removeAsset: (id: string) => void;
+
+   // Helpers
+   getAsset: (id: string) => Asset | undefined;
+   getVideoAsset: (id: string) => VideoAsset | undefined;
+   getImageAsset: (id: string) => ImageAsset | undefined;
+
+   // Root composition
+   setRootComposition: (id: string) => void;
+   getRootComposition: () => CompositionAsset | undefined;
+ }
+
+ - Persisted via Zustand middleware
+ - Initialize with empty root composition on first load
+
+ Create /src/stores/compositionStore.ts
+
+ Manages the active composition being edited (for future subcomposition navigation):
+ interface CompositionState {
+   activeCompositionId: string | null;
+   // Future: composition stack for nested editing
+
+   setActiveComposition: (id: string) => void;
+   getActiveGraph: () => { nodes: Record<string, SceneNode>; edges: Connection[] } | null;
+ }
+
+ ---
+ Phase 3: Asset Factory
+
+ Create /src/utils/asset-factory.ts
+
+ // Create VideoAsset from file (uses existing video-pipeline.ts)
+ async function createVideoAsset(file: File): Promise<VideoAsset>
+
+ // Create ImageAsset from file
+ async function createImageAsset(file: File): Promise<ImageAsset>
+
+ // Create ShapeAsset from SVG path
+ function createShapeAsset(name: string, pathData: string, dimensions: {w, h}): ShapeAsset
+
+ // Create empty CompositionAsset
+ function createCompositionAsset(name: string, dimensions: {w, h}, fps: number): CompositionAsset
+
+ // Auto-detect and create asset from file
+ async function createAssetFromFile(file: File): Promise<VideoAsset | ImageAsset>
+
+ Create /src/utils/asset-loader.ts
+
+ // Load frame from asset for rendering
+ async function loadAssetFrame(
+   asset: VideoAsset | ImageAsset,
+   frameIndex: number
+ ): Promise<ImageBitmap>
+
+ // Get asset dimensions
+ function getAssetDimensions(asset: Asset): { width: number; height: number }
+
+ ---
+ Phase 4: Refactor Graph Store
+
+ Modify /src/stores/graphStore.ts
+
+ Change from storing nodes/edges directly to operating on the active CompositionAsset:
+
+ interface GraphState {
+   // Derived from active composition
+   getNodes: () => SceneNode[];
+   getEdges: () => Connection[];
+
+   // Node operations (update the composition's internal graph)
+   addNode: (node: SceneNode) => void;
+   updateNode: (id: string, updates: Partial<SceneNode>) => void;
+   removeNode: (id: string) => void;
+
+   // Edge operations
+   addEdge: (edge: Connection) => void;
+   removeEdge: (id: string) => void;
+
+   // ReactFlow integration
+   onNodesChange: (changes: NodeChange[]) => void;
+   onEdgesChange: (changes: EdgeChange[]) => void;
+ }
+
+ Key changes:
+ - Read nodes/edges from assetStore.getRootComposition().graph
+ - Write operations update the composition asset
+ - Keep OPFS cleanup logic
+ - Keep single-connection-per-input enforcement
+
+ ---
+ Phase 5: New Node Components
+
+ Create /src/components/nodes/SourceNode.tsx
+
+ Unified source node that renders based on asset type:
+ - Shows preview (video frame, image, shape, or composition thumbnail)
+ - Displays layer name and transform info
+ - Single output handle
+ - Handles file drop to replace asset
+
+ Create /src/components/nodes/OperationNode.tsx
+
+ Operation node with parameter controls:
+ - Shows operation type icon and label
+ - Parameter sliders/inputs based on operationType
+ - Enable/disable toggle
+ - Single input, single output
+
+ Update /src/components/nodes/index.ts
+
+ Export new components, remove old ones
+
+ Update /src/components/flow/FlowCanvas.tsx
+
+ const nodeTypes = {
+   source: SourceNode,
+   operation: OperationNode,
+ };
+
+ Delete old node components:
+
+ - /src/components/nodes/VideoNode.tsx
+ - /src/components/nodes/ImageNode.tsx
+ - /src/components/nodes/FileNode.tsx
+ - /src/components/nodes/BlurNode.tsx
+ - /src/components/nodes/ColorAdjustNode.tsx
+ - /src/components/nodes/MergeNode.tsx
+
+ ---
+ Phase 6: Rendering System
+
+ Create /src/rendering/LayerRenderer.ts
+
+ Renders a single layer through its effect chain:
+ class LayerRenderer {
+   renderLayer(
+     layer: Layer,
+     assetLibrary: Record<string, Asset>,
+     graph: { nodes, edges },
+     frame: number,
+     gpuContext: GPUContext
+   ): GPUTexture
+ }
+
+ Flow:
+ 1. Load asset frame (video/image/shape)
+ 2. Apply baseTransform (future - skip for now)
+ 3. Find connected OperationNodes via edges
+ 4. Build effect chain from operations
+ 5. Execute via existing RenderPipeline
+ 6. Return output texture
+
+ Update /src/hooks/useNodeRenderer.ts
+
+ Adapt to work with new SourceNode/OperationNode types:
+ - For SourceNode: load asset, apply effects, render preview
+ - For OperationNode: find upstream source, render through this operation
+
+ Keep existing GPU infrastructure:
+
+ - /src/gpu/RenderPipeline.ts - Effect chain execution
+ - /src/gpu/effects/*.ts - WebGL effects (blur, colorAdjust)
+ - /src/gpu/WebGLContext.ts - GPU abstraction
+ - /src/gpu/TexturePool.ts - Texture management
+
+ ---
+ Phase 7: UI Updates
+
+ Update /src/components/flow/NodeCommandMenu.tsx
+
+ New menu structure:
+ Add Source
+   ├─ Video
+   ├─ Image
+   └─ Shape (future)
+
+ Add Operation
+   ├─ Blur
+   ├─ Color Correct
+   └─ Transform (future)
+
+ Update /src/hooks/useDragAndDropFiles.ts
+
+ - Create Asset via asset-factory
+ - Add Asset to assetStore
+ - Create SourceNode pointing to asset
+ - Add SourceNode to active composition
+
+ ---
+ Phase 8: Cleanup
+
+ Delete old type files:
+
+ - /src/types/nodes.ts (after migration complete)
+ - /src/types/layer-metadata.ts (Layer now in scene-graph.ts)
+
+ Delete old utilities:
+
+ - /src/utils/graph-traversal.ts (functionality moves to scene-graph-utils)
+ - /src/utils/layer-metadata.ts (layer info now in SourceNode.layer)
+
+ Update imports throughout codebase
+
+ Update localStorage persistence:
+
+ - New key: 'canal-asset-storage'
+ - Migrate or clear old 'canal-graph-storage'
+
+ ---
+ Files Summary
+
+ Create (12 files)
+ ┌─────────────────────────────────────────┬────────────────────────────────────┐
+ │                  File                   │              Purpose               │
+ ├─────────────────────────────────────────┼────────────────────────────────────┤
+ │ /src/types/assets.ts                    │ Asset type definitions             │
+ ├─────────────────────────────────────────┼────────────────────────────────────┤
+ │ /src/types/scene-graph.ts               │ SceneNode, Layer, Connection types │
+ ├─────────────────────────────────────────┼────────────────────────────────────┤
+ │ /src/stores/assetStore.ts               │ Asset library store                │
+ ├─────────────────────────────────────────┼────────────────────────────────────┤
+ │ /src/stores/compositionStore.ts         │ Active composition state           │
+ ├─────────────────────────────────────────┼────────────────────────────────────┤
+ │ /src/utils/asset-factory.ts             │ Asset creation functions           │
+ ├─────────────────────────────────────────┼────────────────────────────────────┤
+ │ /src/utils/asset-loader.ts              │ Asset frame loading                │
+ ├─────────────────────────────────────────┼────────────────────────────────────┤
+ │ /src/utils/scene-graph-utils.ts         │ Graph traversal utilities          │
+ ├─────────────────────────────────────────┼────────────────────────────────────┤
+ │ /src/components/nodes/SourceNode.tsx    │ Source node component              │
+ ├─────────────────────────────────────────┼────────────────────────────────────┤
+ │ /src/components/nodes/OperationNode.tsx │ Operation node component           │
+ ├─────────────────────────────────────────┼────────────────────────────────────┤
+ │ /src/rendering/LayerRenderer.ts         │ Layer rendering logic              │
+ ├─────────────────────────────────────────┼────────────────────────────────────┤
+ │ /src/rendering/index.ts                 │ Rendering exports                  │
+ ├─────────────────────────────────────────┼────────────────────────────────────┤
+ │ /src/utils/shape-renderer.ts            │ Shape to texture (for ShapeAsset)  │
+ └─────────────────────────────────────────┴────────────────────────────────────┘
+ Modify (10 files)
+ ┌──────────────────────────────────────────┬──────────────────────────────┐
+ │                   File                   │           Changes            │
+ ├──────────────────────────────────────────┼──────────────────────────────┤
+ │ /src/stores/graphStore.ts                │ Work with composition graph  │
+ ├──────────────────────────────────────────┼──────────────────────────────┤
+ │ /src/components/nodes/index.ts           │ Export new components        │
+ ├──────────────────────────────────────────┼──────────────────────────────┤
+ │ /src/components/flow/FlowCanvas.tsx      │ New nodeTypes map            │
+ ├──────────────────────────────────────────┼──────────────────────────────┤
+ │ /src/components/flow/NodeCommandMenu.tsx │ New menu structure           │
+ ├──────────────────────────────────────────┼──────────────────────────────┤
+ │ /src/hooks/useNodeRenderer.ts            │ Adapt for new nodes          │
+ ├──────────────────────────────────────────┼──────────────────────────────┤
+ │ /src/hooks/useDragAndDropFiles.ts        │ Create assets + source nodes │
+ ├──────────────────────────────────────────┼──────────────────────────────┤
+ │ /src/constants/initialGraphNodes.ts      │ New initial state            │
+ ├──────────────────────────────────────────┼──────────────────────────────┤
+ │ /src/App.tsx                             │ Initialize root composition  │
+ ├──────────────────────────────────────────┼──────────────────────────────┤
+ │ /src/gpu/effects/registry.ts             │ Map operation types          │
+ ├──────────────────────────────────────────┼──────────────────────────────┤
+ │ /src/stores/renderedOutputStore.ts       │ Update for new node types    │
+ └──────────────────────────────────────────┴──────────────────────────────┘
+ Delete (10 files)
+ ┌───────────────────────────────────────────┬────────────────────────────────────────┐
+ │                   File                    │                 Reason                 │
+ ├───────────────────────────────────────────┼────────────────────────────────────────┤
+ │ /src/types/nodes.ts                       │ Replaced by assets.ts + scene-graph.ts │
+ ├───────────────────────────────────────────┼────────────────────────────────────────┤
+ │ /src/types/layer-metadata.ts              │ Layer now in scene-graph.ts            │
+ ├───────────────────────────────────────────┼────────────────────────────────────────┤
+ │ /src/utils/graph-traversal.ts             │ Replaced by scene-graph-utils          │
+ ├───────────────────────────────────────────┼────────────────────────────────────────┤
+ │ /src/utils/layer-metadata.ts              │ Integrated into new system             │
+ ├───────────────────────────────────────────┼────────────────────────────────────────┤
+ │ /src/components/nodes/VideoNode.tsx       │ Replaced by SourceNode                 │
+ ├───────────────────────────────────────────┼────────────────────────────────────────┤
+ │ /src/components/nodes/ImageNode.tsx       │ Replaced by SourceNode                 │
+ ├───────────────────────────────────────────┼────────────────────────────────────────┤
+ │ /src/components/nodes/FileNode.tsx        │ Replaced by SourceNode                 │
+ ├───────────────────────────────────────────┼────────────────────────────────────────┤
+ │ /src/components/nodes/BlurNode.tsx        │ Replaced by OperationNode              │
+ ├───────────────────────────────────────────┼────────────────────────────────────────┤
+ │ /src/components/nodes/ColorAdjustNode.tsx │ Replaced by OperationNode              │
+ ├───────────────────────────────────────────┼────────────────────────────────────────┤
+ │ /src/components/nodes/MergeNode.tsx       │ Deferred to later phase                │
+ └───────────────────────────────────────────┴────────────────────────────────────────┘
+ Keep unchanged
+
+ - /src/gpu/* - All GPU infrastructure
+ - /src/utils/opfs.ts - OPFS management
+ - /src/utils/video-pipeline.ts - Video processing
+ - /src/utils/video-demuxer.ts - Video demuxing
+ - /src/utils/video-decoder.ts - Video decoding
+ - /src/utils/frame-storage.ts - Frame storage
+
+ ---
+ Verification
+
+ After implementation, verify:
+
+ 1. Asset creation: Drop a video file → VideoAsset created in assetStore, SourceNode appears in graph
+ 2. Asset loading: Video frames load correctly from OPFS via asset metadata
+ 3. Effect chain: Connect SourceNode → BlurNode → renders blurred output
+ 4. Persistence: Refresh page → assets and graph restored from localStorage
+ 5. OPFS cleanup: Delete SourceNode → associated OPFS files cleaned up
+ 6. Timeline sync: Scrubbing timeline updates frame across all source nodes
+
+ ---
+ Deferred to Future Phases
+
+ - Merge/Compositing: Multiple layer blending with blend modes
+ - Subcompositions: Enter/exit composition editing, breadcrumb navigation
+ - Transform operation: Position/scale/rotation as graph operation
+ - Shape rendering: SVG path to texture pipeline
+ - Asset library panel: UI to browse all assets

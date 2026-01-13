@@ -1,6 +1,5 @@
 import { useEffect, useCallback } from 'react';
-import { Handle, Position, useViewport, useUpdateNodeInternals, useReactFlow, addEdge, type NodeProps } from '@xyflow/react';
-import type { CustomNode, BaseNodeData } from '../../types/nodes';
+import { Handle, Position, useViewport, useUpdateNodeInternals, useReactFlow } from '@xyflow/react';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { useGraphStore } from '../../stores/graphStore';
 import { Card } from '@/components/ui/card';
@@ -9,7 +8,15 @@ import { cn } from '@/lib/utils';
 // Base handle size in pixels (constant screen size)
 const HANDLE_BASE_SIZE = 12;
 
-interface BaseNodeCustomProps {
+interface BaseNodeData {
+  label: string;
+  [key: string]: unknown;
+}
+
+interface BaseNodeProps {
+  id: string;
+  data: BaseNodeData;
+  selected?: boolean;
   children?: React.ReactNode;
   icon?: React.ReactNode;
   dimensions?: { width: number; height: number } | null;
@@ -51,10 +58,9 @@ const variantStyles = {
   },
 };
 
-export function BaseNode<T extends BaseNodeData = BaseNodeData>(
-    props: NodeProps<CustomNode<T>> & BaseNodeCustomProps
-  ) {
+export function BaseNode(props: BaseNodeProps) {
   const {
+    id,
     data,
     selected,
     children,
@@ -76,13 +82,12 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
   const cancelConnection = useConnectionStore((state) => state.cancelConnection);
 
   // Graph store for creating edges
-  const edges = useGraphStore((state) => state.edges);
-  const setEdges = useGraphStore((state) => state.setEdges);
+  const addEdgeAction = useGraphStore((state) => state.addEdge);
 
   // Update handle positions when zoom changes so edges connect correctly
   useEffect(() => {
-    updateNodeInternals(props.id);
-  }, [zoom, props.id, updateNodeInternals]);
+    updateNodeInternals(id);
+  }, [zoom, id, updateNodeInternals]);
 
   // Handle click on output (source) handle
   const handleSourceClick = useCallback((e: React.MouseEvent) => {
@@ -90,25 +95,21 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
     e.preventDefault();
 
     // If there's an active connection from a target handle, complete the connection
-    if (activeConnection?.handleType === 'target' && activeConnection?.nodeId !== props.id) {
-      // Remove any existing edge connected to the target handle (single connection per input)
-      const filteredEdges = edges.filter(
-        (edge) => !(edge.target === activeConnection.nodeId && edge.targetHandle === null)
-      );
-      // Create edge: this source -> active target
-      const newEdges = addEdge({
-        source: props.id,
+    if (activeConnection?.handleType === 'target' && activeConnection?.nodeId !== id) {
+      // addEdgeAction handles single-connection-per-input internally
+      addEdgeAction({
+        id: `edge_${Date.now()}`,
+        source: id,
         target: activeConnection.nodeId,
         sourceHandle: null,
         targetHandle: null,
-      }, filteredEdges);
-      setEdges(newEdges);
+      });
       cancelConnection();
       return;
     }
 
     // If already connecting from this handle, cancel
-    if (activeConnection?.nodeId === props.id && activeConnection?.handleType === 'source') {
+    if (activeConnection?.nodeId === id && activeConnection?.handleType === 'source') {
       cancelConnection();
       return;
     }
@@ -119,7 +120,7 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
     }
 
     // Get node position for the connection line
-    const node = getNode(props.id);
+    const node = getNode(id);
     if (!node) return;
 
     // Calculate handle position (bottom center of node)
@@ -127,13 +128,13 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
     const handleY = node.position.y + (node.measured?.height ?? 100);
 
     startConnection({
-      nodeId: props.id,
+      nodeId: id,
       handleType: 'source',
       handlePosition: Position.Bottom,
       x: handleX,
       y: handleY,
     });
-  }, [props.id, activeConnection, startConnection, cancelConnection, getNode, edges, setEdges]);
+  }, [id, activeConnection, startConnection, cancelConnection, getNode, addEdgeAction]);
 
   // Handle click on input (target) handle
   const handleTargetClick = useCallback((e: React.MouseEvent) => {
@@ -141,25 +142,21 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
     e.preventDefault();
 
     // If there's an active connection from a source handle, complete the connection
-    if (activeConnection?.handleType === 'source' && activeConnection?.nodeId !== props.id) {
-      // Remove any existing edge connected to this target handle (single connection per input)
-      const filteredEdges = edges.filter(
-        (edge) => !(edge.target === props.id && edge.targetHandle === null)
-      );
-      // Create edge: active source -> this target
-      const newEdges = addEdge({
+    if (activeConnection?.handleType === 'source' && activeConnection?.nodeId !== id) {
+      // addEdgeAction handles single-connection-per-input internally
+      addEdgeAction({
+        id: `edge_${Date.now()}`,
         source: activeConnection.nodeId,
-        target: props.id,
+        target: id,
         sourceHandle: null,
         targetHandle: null,
-      }, filteredEdges);
-      setEdges(newEdges);
+      });
       cancelConnection();
       return;
     }
 
     // If already connecting from this handle, cancel
-    if (activeConnection?.nodeId === props.id && activeConnection?.handleType === 'target') {
+    if (activeConnection?.nodeId === id && activeConnection?.handleType === 'target') {
       cancelConnection();
       return;
     }
@@ -170,7 +167,7 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
     }
 
     // Get node position for the connection line
-    const node = getNode(props.id);
+    const node = getNode(id);
     if (!node) return;
 
     // Calculate handle position (top center of node)
@@ -178,17 +175,17 @@ export function BaseNode<T extends BaseNodeData = BaseNodeData>(
     const handleY = node.position.y;
 
     startConnection({
-      nodeId: props.id,
+      nodeId: id,
       handleType: 'target',
       handlePosition: Position.Top,
       x: handleX,
       y: handleY,
     });
-  }, [props.id, activeConnection, startConnection, cancelConnection, getNode, edges, setEdges]);
+  }, [id, activeConnection, startConnection, cancelConnection, getNode, addEdgeAction]);
 
   // Check if this handle is a valid drop target
-  const isValidSourceTarget = activeConnection?.handleType === 'target' && activeConnection?.nodeId !== props.id;
-  const isValidTargetTarget = activeConnection?.handleType === 'source' && activeConnection?.nodeId !== props.id;
+  const isValidSourceTarget = activeConnection?.handleType === 'target' && activeConnection?.nodeId !== id;
+  const isValidTargetTarget = activeConnection?.handleType === 'source' && activeConnection?.nodeId !== id;
 
   return (
     <Card

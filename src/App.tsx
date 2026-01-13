@@ -1,7 +1,7 @@
 import './App.css'
 import { ReactFlowProvider } from '@xyflow/react';
-import { FlowCanvas } from './components/Flow';
-import { TimelineScrubber } from './components/Timeline/TimelineScrubber';
+import { FlowCanvas } from './components/flow';
+import { TimelineScrubber } from './components/timeline/TimelineScrubber';
 
 
 export default function App() {
