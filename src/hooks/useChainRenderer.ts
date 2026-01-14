@@ -6,7 +6,7 @@
  * (with effects applied).
  */
 
-import { useRef, useEffect, useCallback, useState } from 'react';
+import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import { useAssetStore } from '../stores/assetStore';
 import { useCompositionStore } from '../stores/compositionStore';
 import { useTimelineStore } from '../stores/timelineStore';
@@ -69,8 +69,26 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
 
   // Stores
   const assets = useAssetStore((s) => s.assets);
-  const globalFrame = useTimelineStore((s) => s.currentFrame);
-  const isPlaying = useTimelineStore((s) => s.isPlaying);
+
+  // Optimized frame subscription:
+  // - Selected nodes subscribe to currentFrame for real-time updates
+  // - Unselected nodes only subscribe to pauseTrigger to update when playback stops
+  const pauseTrigger = useTimelineStore((s) => s.pauseTrigger);
+
+  // Only subscribe to currentFrame when selected - this prevents re-renders during playback
+  const globalFrame = useTimelineStore((s) => selected ? s.currentFrame : null);
+
+  // Determine the frame to render:
+  // - If selected: use globalFrame (real-time updates)
+  // - If not selected: use cached frame, updated only when pauseTrigger changes
+  const currentFrame = useMemo(() => {
+    if (selected && globalFrame !== null) {
+      return globalFrame;
+    }
+    // When not selected, read current frame directly from store on pauseTrigger change
+    return useTimelineStore.getState().currentFrame;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, globalFrame, pauseTrigger]);
 
   // Get the active graph by subscribing to composition
   const activeCompId = useCompositionStore((s) => s.activeCompositionId);
@@ -83,9 +101,6 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
     return null;
   });
   const graph = composition?.graph ?? null;
-
-  // Only update current frame when selected OR not playing
-  const currentFrame = (selected || !isPlaying) ? globalFrame : (lastRenderedFrameRef.current ?? 0);
 
   // Initialize GPU context
   useEffect(() => {

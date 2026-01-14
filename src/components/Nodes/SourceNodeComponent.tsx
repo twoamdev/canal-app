@@ -99,17 +99,31 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
 
   // Stores
   const assets = useAssetStore((s) => s.assets);
-  // Only subscribe to frame changes when selected to avoid unnecessary re-renders
-  const globalFrame = useTimelineStore((s) => s.currentFrame);
-  const isPlaying = useTimelineStore((s) => s.isPlaying);
   const activeConnection = useConnectionStore((s) => s.activeConnection);
   const startConnection = useConnectionStore((s) => s.startConnection);
   const cancelConnection = useConnectionStore((s) => s.cancelConnection);
   const addEdge = useGraphStore((s) => s.addEdge);
 
-  // Only update current frame when selected OR not playing
-  // This prevents all nodes from re-rendering during playback
-  const currentFrame = (selected || !isPlaying) ? globalFrame : (lastRenderedFrameRef.current ?? 0);
+  // Optimized frame subscription:
+  // - Selected nodes subscribe to currentFrame for real-time updates
+  // - Unselected nodes only subscribe to pauseTrigger to update when playback stops
+  const pauseTrigger = useTimelineStore((s) => s.pauseTrigger);
+
+  // Only subscribe to currentFrame when selected - this prevents re-renders during playback
+  const globalFrame = useTimelineStore((s) => selected ? s.currentFrame : null);
+
+  // Determine the frame to render:
+  // - If selected: use globalFrame (real-time updates)
+  // - If not selected: use cached frame, updated only when pauseTrigger changes
+  const currentFrame = useMemo(() => {
+    if (selected && globalFrame !== null) {
+      return globalFrame;
+    }
+    // When not selected, read current frame directly from store on pauseTrigger change
+    // This avoids subscription but still updates when playback stops
+    return useTimelineStore.getState().currentFrame;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, globalFrame, pauseTrigger]);
 
   // ReactFlow
   const { zoom } = useViewport();

@@ -28,6 +28,7 @@ export function TimelineScrubber() {
   const setFrameRange = useTimelineStore((state) => state.setFrameRange);
   const setIsPlaying = useTimelineStore((state) => state.setIsPlaying);
   const togglePlayback = useTimelineStore((state) => state.togglePlayback);
+  const triggerPauseUpdate = useTimelineStore((state) => state.triggerPauseUpdate);
 
   // Playback refs
   const playbackRef = useRef<number | null>(null);
@@ -146,6 +147,8 @@ export function TimelineScrubber() {
 
     const handleMouseUp = () => {
       setIsDragging(false);
+      // Trigger pause update so all nodes refresh to show the current frame
+      triggerPauseUpdate();
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -155,7 +158,7 @@ export function TimelineScrubber() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, frameFromX, setCurrentFrame]);
+  }, [isDragging, frameFromX, setCurrentFrame, triggerPauseUpdate]);
 
   // Playback loop - always loops by default
   useEffect(() => {

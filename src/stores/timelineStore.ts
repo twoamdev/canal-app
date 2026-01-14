@@ -16,6 +16,10 @@ interface TimelineState {
   isLooping: boolean;
   fps: number;
 
+  // Trigger that increments when playback pauses - unselected nodes subscribe to this
+  // to know when to update their display without subscribing to currentFrame
+  pauseTrigger: number;
+
   // Actions
   setCurrentFrame: (frame: number) => void;
   setFrameRange: (start: number, end: number) => void;
@@ -24,6 +28,8 @@ interface TimelineState {
   setIsLooping: (looping: boolean) => void;
   toggleLooping: () => void;
   setFps: (fps: number) => void;
+  /** Trigger pause update - increments pauseTrigger to signal nodes to refresh */
+  triggerPauseUpdate: () => void;
 
   // Frame navigation
   nextFrame: () => void;
@@ -43,6 +49,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   isPlaying: false,
   isLooping: true,
   fps: 30,
+  pauseTrigger: 0,
 
   // Actions
   setCurrentFrame: (frame) => {
@@ -76,15 +83,33 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     }
   },
 
-  setIsPlaying: (playing) => set({ isPlaying: playing }),
+  setIsPlaying: (playing) => {
+    const wasPlaying = get().isPlaying;
+    // Increment pauseTrigger when playback stops to signal unselected nodes to update
+    if (wasPlaying && !playing) {
+      set((state) => ({ isPlaying: playing, pauseTrigger: state.pauseTrigger + 1 }));
+    } else {
+      set({ isPlaying: playing });
+    }
+  },
 
-  togglePlayback: () => set((state) => ({ isPlaying: !state.isPlaying })),
+  togglePlayback: () => {
+    const { isPlaying, pauseTrigger } = get();
+    // Increment pauseTrigger when playback stops
+    if (isPlaying) {
+      set({ isPlaying: false, pauseTrigger: pauseTrigger + 1 });
+    } else {
+      set({ isPlaying: true });
+    }
+  },
 
   setIsLooping: (looping) => set({ isLooping: looping }),
 
   toggleLooping: () => set((state) => ({ isLooping: !state.isLooping })),
 
   setFps: (fps) => set({ fps: Math.max(1, fps) }),
+
+  triggerPauseUpdate: () => set((state) => ({ pauseTrigger: state.pauseTrigger + 1 })),
 
   // Frame navigation
   nextFrame: () => {

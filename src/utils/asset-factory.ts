@@ -149,6 +149,8 @@ export async function createVideoAsset(
 
   // Extract frames and get video metadata
   let videoMetadata: VideoAssetMetadata;
+  let intrinsicWidth = 0;
+  let intrinsicHeight = 0;
 
   if (extractFrames) {
     const extractResult = await extractAndStoreFrames(fileMetadata, {
@@ -158,6 +160,9 @@ export async function createVideoAsset(
     } as ExtractFramesOptions);
 
     const { trackInfo } = extractResult;
+
+    intrinsicWidth = trackInfo.width;
+    intrinsicHeight = trackInfo.height;
 
     videoMetadata = {
       fileHandleId: opfsPath,
@@ -189,8 +194,8 @@ export async function createVideoAsset(
     id: generateAssetId('video'),
     type: 'video',
     name: file.name,
-    intrinsicWidth: videoMetadata.frameCount > 0 ? 1920 : 0, // Will be updated from actual frame dimensions
-    intrinsicHeight: videoMetadata.frameCount > 0 ? 1080 : 0,
+    intrinsicWidth,
+    intrinsicHeight,
     createdAt: now,
     updatedAt: now,
     metadata: videoMetadata,
