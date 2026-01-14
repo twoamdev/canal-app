@@ -28,13 +28,11 @@ import {
 } from '../../types/assets';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { FileVideo, Image, Shapes, Layers, Loader2 } from 'lucide-react';
+import { FileVideo, Image, Shapes, Layers } from 'lucide-react';
+import { AssetViewer, drawCheckerboard, DEFAULT_VIEWER_WIDTH, DEFAULT_VIEWER_HEIGHT } from '../viewers';
 
 // Handle size constant
 const HANDLE_BASE_SIZE = 12;
-
-// Checkerboard pattern size
-const CHECKER_SIZE = 8;
 
 // Asset type icons
 const ASSET_ICONS = {
@@ -78,25 +76,6 @@ const variantStyles = {
     iconText: 'text-yellow-600',
   },
 };
-
-/**
- * Draw a checkerboard pattern on a canvas (for loading placeholders)
- */
-function drawCheckerboard(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  color1 = '#2a2a2a',
-  color2 = '#3a3a3a'
-): void {
-  for (let y = 0; y < height; y += CHECKER_SIZE) {
-    for (let x = 0; x < width; x += CHECKER_SIZE) {
-      const isEven = ((x / CHECKER_SIZE) + (y / CHECKER_SIZE)) % 2 === 0;
-      ctx.fillStyle = isEven ? color1 : color2;
-      ctx.fillRect(x, y, CHECKER_SIZE, CHECKER_SIZE);
-    }
-  }
-}
 
 interface SourceNodeComponentProps {
   id: string;
@@ -146,7 +125,7 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
 
   // Get asset type and dimensions
   const assetType = asset?.type ?? 'video';
-  const dimensions = asset ? getAssetDimensions(asset) : { width: 320, height: 180 };
+  const dimensions = asset ? getAssetDimensions(asset) : { width: DEFAULT_VIEWER_WIDTH, height: DEFAULT_VIEWER_HEIGHT };
   const variant = ASSET_VARIANTS[assetType] ?? 'default';
   const styles = variantStyles[variant];
   const IconComponent = ASSET_ICONS[assetType] ?? FileVideo;
@@ -314,16 +293,26 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
   // Check if this handle is a valid drop target
   const isValidSourceTarget = activeConnection?.handleType === 'target' && activeConnection?.nodeId !== id;
 
-  // Render shape preview
+  // Render shape preview with checkerboard background at full resolution
   const renderShapePreview = () => {
     if (!asset || !isShapeAsset(asset)) return null;
 
     const { pathData, fillColor, strokeColor, strokeWidth, fillRule } = asset.metadata;
+    const width = asset.intrinsicWidth;
+    const height = asset.intrinsicHeight;
 
     return (
-      <div className="relative rounded overflow-hidden bg-black aspect-video flex items-center justify-center">
+      <div
+        className="relative rounded overflow-hidden"
+        style={{
+          width: `${width}px`,
+          height: `${height}px`,
+          backgroundImage: `repeating-conic-gradient(#2a2a2a 0% 25%, #3a3a3a 0% 50%)`,
+          backgroundSize: '16px 16px',
+        }}
+      >
         <svg
-          viewBox={`0 0 ${asset.intrinsicWidth} ${asset.intrinsicHeight}`}
+          viewBox={`0 0 ${width} ${height}`}
           className="w-full h-full"
         >
           <path
@@ -338,15 +327,25 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
     );
   };
 
-  // Render composition preview (placeholder for now)
+  // Render composition preview with checkerboard background at full resolution
   const renderCompositionPreview = () => {
     if (!asset || !isCompositionAsset(asset)) return null;
 
     return (
-      <div className="relative rounded overflow-hidden bg-muted aspect-video flex items-center justify-center">
-        <div className="text-center text-muted-foreground">
-          <Layers className="w-8 h-8 mx-auto mb-1 opacity-50" />
-          <span className="text-xs">Composition</span>
+      <div
+        className="relative rounded overflow-hidden"
+        style={{
+          width: `${dimensions.width}px`,
+          height: `${dimensions.height}px`,
+          backgroundImage: `repeating-conic-gradient(#2a2a2a 0% 25%, #3a3a3a 0% 50%)`,
+          backgroundSize: '16px 16px',
+        }}
+      >
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="text-center text-muted-foreground">
+            <Layers className="w-8 h-8 mx-auto mb-1 opacity-50" />
+            <span className="text-xs">Composition</span>
+          </div>
         </div>
       </div>
     );
@@ -355,15 +354,13 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
   // Render loading indicator for asset processing
   const renderAssetProcessing = () => {
     return (
-      <div className="relative rounded overflow-hidden bg-muted aspect-video">
-        <canvas ref={canvasRef} className="w-full h-auto opacity-50" />
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground mb-2" />
-          <span className="text-xs text-muted-foreground">
-            Processing... {Math.round(loadingProgress * 100)}%
-          </span>
-        </div>
-      </div>
+      <AssetViewer
+        canvasRef={canvasRef}
+        width={dimensions.width}
+        height={dimensions.height}
+        isLoading={true}
+        loadingProgress={loadingProgress}
+      />
     );
   };
 
@@ -410,23 +407,13 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
 
           {/* Video/Image preview (only when asset is ready) */}
           {!assetIsLoading && (isVideoAsset(asset) || isImageAsset(asset)) && (
-            <div className="relative rounded overflow-hidden bg-black">
-              <canvas
-                ref={canvasRef}
-                className="w-full h-auto"
-              />
-              {/* Only show loading overlay on initial load */}
-              {initialLoading && !assetIsLoading && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                  <span className="text-xs">Loading...</span>
-                </div>
-              )}
-              {error && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-red-400">
-                  <span className="text-xs">{error}</span>
-                </div>
-              )}
-            </div>
+            <AssetViewer
+              canvasRef={canvasRef}
+              width={dimensions.width}
+              height={dimensions.height}
+              isLoading={initialLoading}
+              error={error}
+            />
           )}
 
           {/* Shape preview */}

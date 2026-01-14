@@ -20,6 +20,7 @@ import { RenderPipeline, type RenderNode } from '../gpu/RenderPipeline';
 import '../gpu/effects';
 import type { OperationType } from '../types/scene-graph';
 import type { UniformValue } from '../gpu/types';
+import { DEFAULT_VIEWER_WIDTH, DEFAULT_VIEWER_HEIGHT, drawCheckerboard } from '../components/viewers';
 
 // Map operation types to GPU effect names
 const OPERATION_TO_EFFECT: Record<OperationType, string> = {
@@ -41,6 +42,7 @@ interface ChainRendererState {
   isLoading: boolean;
   error: string | null;
   hasUpstream: boolean;
+  dimensions: { width: number; height: number };
 }
 
 /**
@@ -54,13 +56,15 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
   const texturePoolRef = useRef<TexturePool | null>(null);
   const pipelineRef = useRef<RenderPipeline | null>(null);
   const lastRenderedFrameRef = useRef<number | null>(null);
+  const lastParamsHashRef = useRef<string | null>(null);
   const offscreenCanvasRef = useRef<OffscreenCanvas | null>(null);
 
-  // State
+  // State - default to 1080x1080 until we know the actual dimensions
   const [state, setState] = useState<ChainRendererState>({
     isLoading: true,
     error: null,
     hasUpstream: false,
+    dimensions: { width: DEFAULT_VIEWER_WIDTH, height: DEFAULT_VIEWER_HEIGHT },
   });
 
   // Stores
@@ -89,7 +93,7 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
     if (!canvas) return;
 
     // Create offscreen canvas for GPU rendering (will be resized as needed)
-    const offscreen = new OffscreenCanvas(1920, 1080);
+    const offscreen = new OffscreenCanvas(DEFAULT_VIEWER_WIDTH, DEFAULT_VIEWER_HEIGHT);
     offscreenCanvasRef.current = offscreen;
 
     const context = new WebGLContext();
@@ -130,7 +134,7 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
     const chain = findUpstreamChain(sceneGraph, nodeId);
 
     if (!chain.isComplete || !chain.sourceNode) {
-      setState({ isLoading: false, error: null, hasUpstream: false });
+      setState((s) => ({ ...s, isLoading: false, error: null, hasUpstream: false }));
       return;
     }
 
@@ -139,19 +143,22 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
     // Get the source asset
     const sourceAsset = assets[chain.sourceNode.layer.assetId];
     if (!sourceAsset) {
-      setState({ isLoading: false, error: 'Source asset not found', hasUpstream: true });
+      setState((s) => ({ ...s, isLoading: false, error: 'Source asset not found', hasUpstream: true }));
       return;
     }
 
+    // Update dimensions from source asset
+    const assetDimensions = { width: sourceAsset.intrinsicWidth, height: sourceAsset.intrinsicHeight };
+
     // Only render video/image assets
     if (!isVideoAsset(sourceAsset) && !isImageAsset(sourceAsset)) {
-      setState({ isLoading: false, error: 'Unsupported asset type', hasUpstream: true });
+      setState((s) => ({ ...s, isLoading: false, error: 'Unsupported asset type', hasUpstream: true, dimensions: assetDimensions }));
       return;
     }
 
     // Check if asset is still loading
     if (sourceAsset.loadingState?.isLoading) {
-      setState({ isLoading: true, error: null, hasUpstream: true });
+      setState((s) => ({ ...s, isLoading: true, error: null, hasUpstream: true, dimensions: assetDimensions }));
       return;
     }
 
@@ -162,22 +169,25 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
       sourceAsset
     );
 
-    // If null, layer is not active at this frame
+    // If null, layer is not active at this frame - show checkerboard
     if (sourceFrame === null) {
-      // Draw checkerboard or clear
       const canvas = canvasRef.current;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.fillStyle = '#2a2a2a';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        drawCheckerboard(ctx, canvas.width, canvas.height);
       }
       lastRenderedFrameRef.current = null;
-      setState({ isLoading: false, error: null, hasUpstream: true });
+      setState((s) => ({ ...s, isLoading: false, error: null, hasUpstream: true, dimensions: assetDimensions }));
       return;
     }
 
-    // Skip if we already rendered this frame (and no effects have changed)
-    if (lastRenderedFrameRef.current === sourceFrame) {
+    // Create a hash of effect parameters to detect changes
+    const paramsHash = chain.operationNodes
+      .map((op) => `${op.id}:${op.isEnabled}:${JSON.stringify(op.params)}`)
+      .join('|');
+
+    // Skip if we already rendered this frame AND effect params haven't changed
+    if (lastRenderedFrameRef.current === sourceFrame && lastParamsHashRef.current === paramsHash) {
       return;
     }
 
@@ -203,7 +213,8 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
           ctx.drawImage(bitmap, 0, 0);
         }
         lastRenderedFrameRef.current = sourceFrame;
-        setState({ isLoading: false, error: null, hasUpstream: true });
+        lastParamsHashRef.current = paramsHash;
+        setState((s) => ({ ...s, isLoading: false, error: null, hasUpstream: true, dimensions: assetDimensions }));
         return;
       }
 
@@ -222,7 +233,8 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
           ctx.drawImage(bitmap, 0, 0);
         }
         lastRenderedFrameRef.current = sourceFrame;
-        setState({ isLoading: false, error: null, hasUpstream: true });
+        lastParamsHashRef.current = paramsHash;
+        setState((s) => ({ ...s, isLoading: false, error: null, hasUpstream: true, dimensions: assetDimensions }));
         return;
       }
 
@@ -245,7 +257,8 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
           ctx.drawImage(bitmap, 0, 0);
         }
         lastRenderedFrameRef.current = sourceFrame;
-        setState({ isLoading: false, error: null, hasUpstream: true });
+        lastParamsHashRef.current = paramsHash;
+        setState((s) => ({ ...s, isLoading: false, error: null, hasUpstream: true, dimensions: assetDimensions }));
         return;
       }
 
@@ -283,10 +296,11 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
       sourceTexture.dispose();
 
       lastRenderedFrameRef.current = sourceFrame;
-      setState({ isLoading: false, error: null, hasUpstream: true });
+      lastParamsHashRef.current = paramsHash;
+      setState((s) => ({ ...s, isLoading: false, error: null, hasUpstream: true, dimensions: assetDimensions }));
     } catch (err) {
       console.error('Failed to render chain:', err);
-      setState({ isLoading: false, error: 'Render failed', hasUpstream: true });
+      setState((s) => ({ ...s, isLoading: false, error: 'Render failed', hasUpstream: true }));
     }
   }, [graph, nodeId, assets, currentFrame, canvasRef]);
 

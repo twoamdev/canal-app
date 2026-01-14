@@ -14,7 +14,8 @@ import { useChainRenderer } from '../../hooks/useChainRenderer';
 import { Card } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
-import { CircleDot, Palette, Move, Loader2 } from 'lucide-react';
+import { CircleDot, Palette, Move } from 'lucide-react';
+import { AssetViewer } from '../viewers';
 
 // Handle size constant
 const HANDLE_BASE_SIZE = 12;
@@ -54,7 +55,7 @@ export function OperationNodeComponent(props: OperationNodeComponentProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Chain renderer for preview
-  const { isLoading, error, hasUpstream } = useChainRenderer({
+  const { isLoading, error, hasUpstream, dimensions } = useChainRenderer({
     nodeId: id,
     selected: selected ?? false,
     canvasRef,
@@ -219,30 +220,15 @@ export function OperationNodeComponent(props: OperationNodeComponentProps) {
         </div>
 
         {/* Preview canvas with effect chain applied */}
-        <div className="relative rounded overflow-hidden bg-black aspect-video">
-          <canvas
-            ref={canvasRef}
-            className="w-full h-auto"
-          />
-          {/* Loading state */}
-          {isLoading && hasUpstream && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-            </div>
-          )}
-          {/* No upstream connection */}
-          {!hasUpstream && (
-            <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/60">
-              <span className="text-xs">No input connected</span>
-            </div>
-          )}
-          {/* Error state */}
-          {error && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-red-400">
-              <span className="text-xs">{error}</span>
-            </div>
-          )}
-        </div>
+        <AssetViewer
+          canvasRef={canvasRef}
+          width={dimensions.width}
+          height={dimensions.height}
+          isLoading={isLoading && hasUpstream}
+          error={error}
+          isEmpty={!hasUpstream}
+          emptyMessage="No input connected"
+        />
       </div>
 
       {/* Output handle on bottom */}
