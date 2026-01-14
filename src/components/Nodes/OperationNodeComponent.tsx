@@ -2,17 +2,16 @@
  * OperationNode Component
  *
  * Unified operation node that handles blur, color_correct, and transform operations.
- * Shows preview with effects applied and parameter controls.
+ * Shows preview with effects applied. Parameter controls are in the PropertiesPanel.
  */
 
 import { useCallback, useRef, useEffect } from 'react';
 import { Handle, Position, useViewport, useUpdateNodeInternals, useReactFlow } from '@xyflow/react';
-import type { OperationNode, OperationType, BlurParams, ColorCorrectParams } from '../../types/scene-graph';
+import type { OperationNode, OperationType } from '../../types/scene-graph';
 import { useGraphStore } from '../../stores/graphStore';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { useChainRenderer } from '../../hooks/useChainRenderer';
 import { Card } from '@/components/ui/card';
-import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { CircleDot, Palette, Move, Loader2 } from 'lucide-react';
@@ -49,7 +48,7 @@ interface OperationNodeComponentProps {
 
 export function OperationNodeComponent(props: OperationNodeComponentProps) {
   const { id, data, selected } = props;
-  const { operationType, params, isEnabled, label } = data;
+  const { operationType, isEnabled, label } = data;
 
   // Refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -80,22 +79,6 @@ export function OperationNodeComponent(props: OperationNodeComponentProps) {
   useEffect(() => {
     updateNodeInternals(id);
   }, [zoom, id, updateNodeInternals]);
-
-  // Update a parameter
-  const updateParam = useCallback(
-    (paramName: string, value: number | boolean | string) => {
-      updateNode(id, (node) => {
-        if (node.type !== 'operation') return {};
-        return {
-          params: {
-            ...node.params,
-            [paramName]: value,
-          },
-        };
-      });
-    },
-    [id, updateNode]
-  );
 
   // Toggle enabled
   const toggleEnabled = useCallback(() => {
@@ -188,130 +171,6 @@ export function OperationNodeComponent(props: OperationNodeComponentProps) {
   const isValidSourceTarget = activeConnection?.handleType === 'target' && activeConnection?.nodeId !== id;
   const isValidTargetTarget = activeConnection?.handleType === 'source' && activeConnection?.nodeId !== id;
 
-  // Render blur controls
-  const renderBlurControls = () => {
-    const blurParams = params as BlurParams;
-    const radius = blurParams.radius ?? 10;
-
-    return (
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="font-medium">Radius</span>
-          <span className="tabular-nums">{radius}px</span>
-        </div>
-        <Slider
-          value={[radius]}
-          min={0}
-          max={50}
-          step={1}
-          onValueChange={(v) => updateParam('radius', v[0])}
-          disabled={!isEnabled}
-        />
-      </div>
-    );
-  };
-
-  // Render color correct controls
-  const renderColorCorrectControls = () => {
-    const colorParams = params as ColorCorrectParams;
-    const brightness = colorParams.brightness ?? 0;
-    const contrast = colorParams.contrast ?? 1;
-    const saturation = colorParams.saturation ?? 1;
-    const exposure = colorParams.exposure ?? 0;
-
-    return (
-      <div className="space-y-3">
-        {/* Brightness */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="font-medium">Brightness</span>
-            <span className="tabular-nums">{brightness.toFixed(2)}</span>
-          </div>
-          <Slider
-            value={[brightness]}
-            min={-1}
-            max={1}
-            step={0.01}
-            onValueChange={(v) => updateParam('brightness', v[0])}
-            disabled={!isEnabled}
-          />
-        </div>
-
-        {/* Contrast */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="font-medium">Contrast</span>
-            <span className="tabular-nums">{contrast.toFixed(2)}</span>
-          </div>
-          <Slider
-            value={[contrast]}
-            min={0}
-            max={2}
-            step={0.01}
-            onValueChange={(v) => updateParam('contrast', v[0])}
-            disabled={!isEnabled}
-          />
-        </div>
-
-        {/* Saturation */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="font-medium">Saturation</span>
-            <span className="tabular-nums">{saturation.toFixed(2)}</span>
-          </div>
-          <Slider
-            value={[saturation]}
-            min={0}
-            max={2}
-            step={0.01}
-            onValueChange={(v) => updateParam('saturation', v[0])}
-            disabled={!isEnabled}
-          />
-        </div>
-
-        {/* Exposure */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="font-medium">Exposure</span>
-            <span className="tabular-nums">{exposure.toFixed(2)}</span>
-          </div>
-          <Slider
-            value={[exposure]}
-            min={-2}
-            max={2}
-            step={0.01}
-            onValueChange={(v) => updateParam('exposure', v[0])}
-            disabled={!isEnabled}
-          />
-        </div>
-      </div>
-    );
-  };
-
-  // Render transform controls (placeholder for now)
-  const renderTransformControls = () => {
-    // TODO: Implement transform controls with params as TransformParams
-    return (
-      <div className="py-4 text-center text-muted-foreground/60 border border-dashed border-muted rounded">
-        Transform controls coming soon
-      </div>
-    );
-  };
-
-  // Render controls based on operation type
-  const renderControls = () => {
-    switch (operationType) {
-      case 'blur':
-        return renderBlurControls();
-      case 'color_correct':
-        return renderColorCorrectControls();
-      case 'transform':
-        return renderTransformControls();
-      default:
-        return null;
-    }
-  };
-
   return (
     <Card
       className={cn(
@@ -383,11 +242,6 @@ export function OperationNodeComponent(props: OperationNodeComponentProps) {
               <span className="text-xs">{error}</span>
             </div>
           )}
-        </div>
-
-        {/* Parameter controls */}
-        <div className="text-xs text-muted-foreground">
-          {renderControls()}
         </div>
       </div>
 

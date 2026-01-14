@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { SceneNode, Connection } from '../types/scene-graph';
 import { useAssetStore } from './assetStore';
 import { isCompositionAsset } from '../types/assets';
+import { useTimelineStore } from './timelineStore';
 
 // =============================================================================
 // Types
@@ -52,6 +53,8 @@ export const useCompositionStore = create<CompositionState>()(
       activeCompositionId: id,
       compositionStack: [id],
     });
+    // Sync timeline with the new composition
+    useTimelineStore.getState().syncWithComposition();
   },
 
   enterComposition: (id) => {
@@ -60,35 +63,39 @@ export const useCompositionStore = create<CompositionState>()(
       activeCompositionId: id,
       compositionStack: [...state.compositionStack, id],
     }));
+    // Sync timeline with the new composition
+    useTimelineStore.getState().syncWithComposition();
   },
 
   exitComposition: () => {
-    set((state) => {
-      if (state.compositionStack.length <= 1) {
-        // Already at root, can't exit further
-        return state;
-      }
+    const state = get();
+    if (state.compositionStack.length <= 1) {
+      // Already at root, can't exit further
+      return;
+    }
 
-      const newStack = state.compositionStack.slice(0, -1);
-      return {
-        activeCompositionId: newStack[newStack.length - 1],
-        compositionStack: newStack,
-      };
+    const newStack = state.compositionStack.slice(0, -1);
+    set({
+      activeCompositionId: newStack[newStack.length - 1],
+      compositionStack: newStack,
     });
+    // Sync timeline with the parent composition
+    useTimelineStore.getState().syncWithComposition();
   },
 
   exitToRoot: () => {
-    set((state) => {
-      if (state.compositionStack.length === 0) {
-        return state;
-      }
+    const state = get();
+    if (state.compositionStack.length === 0) {
+      return;
+    }
 
-      const rootId = state.compositionStack[0];
-      return {
-        activeCompositionId: rootId,
-        compositionStack: [rootId],
-      };
+    const rootId = state.compositionStack[0];
+    set({
+      activeCompositionId: rootId,
+      compositionStack: [rootId],
     });
+    // Sync timeline with the root composition
+    useTimelineStore.getState().syncWithComposition();
   },
 
   // ==========================================================================
@@ -159,6 +166,9 @@ export function initializeCompositionSystem(): void {
 
   if (!currentActiveValid) {
     compositionStore.setActiveComposition(rootCompId);
+  } else {
+    // Sync timeline with the existing active composition
+    useTimelineStore.getState().syncWithComposition();
   }
 }
 

@@ -349,6 +349,10 @@ export function createShapeAsset(
 export interface CreateCompositionAssetOptions {
   /** Duration in frames */
   durationFrames?: number;
+  /** Work area start frame */
+  workAreaStart?: number;
+  /** Work area end frame */
+  workAreaEnd?: number;
 }
 
 /**
@@ -361,6 +365,7 @@ export function createCompositionAsset(
   options: CreateCompositionAssetOptions = {}
 ): CompositionAsset {
   const { durationFrames = fps * 10 } = options; // Default 10 seconds
+  const { workAreaStart = 0, workAreaEnd = durationFrames } = options;
 
   const now = Date.now();
 
@@ -373,6 +378,8 @@ export function createCompositionAsset(
     dimensions,
     fps,
     durationFrames,
+    workAreaStart,
+    workAreaEnd,
     createdAt: now,
     updatedAt: now,
     graph: {

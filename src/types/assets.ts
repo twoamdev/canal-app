@@ -126,8 +126,12 @@ export interface CompositionAsset extends BaseAsset {
   dimensions: CompositionDimensions;
   /** Frame rate of the composition */
   fps: number;
-  /** Duration in frames */
+  /** Duration in frames (total length of composition) */
   durationFrames: number;
+  /** Work area start frame (in point for playback) */
+  workAreaStart: number;
+  /** Work area end frame (out point for playback) */
+  workAreaEnd: number;
   /** The scene graph for this composition */
   graph: CompositionGraph;
 }

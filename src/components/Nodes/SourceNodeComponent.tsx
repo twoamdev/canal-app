@@ -441,40 +441,6 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
               Asset not found
             </div>
           )}
-
-          {/* Asset info - only show when asset is ready */}
-          {asset && !assetIsLoading && (
-            <div className="mt-2 space-y-1 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Type:</span>
-                <span className="capitalize">{asset.type}</span>
-              </div>
-              {isVideoAsset(asset) && (
-                <>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Frames:</span>
-                    <span>{asset.metadata.frameCount}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">FPS:</span>
-                    <span>{asset.metadata.fps}</span>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Time range info */}
-          <div className="mt-2 pt-2 border-t border-border space-y-1 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">In:</span>
-              <span>{layer.timeRange.inFrame}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Out:</span>
-              <span>{layer.timeRange.outFrame}</span>
-            </div>
-          </div>
         </div>
       </div>
 

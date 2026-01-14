@@ -114,6 +114,7 @@ async function cleanupAssetFiles(asset: Asset): Promise<void> {
  */
 function createRootComposition(): CompositionAsset {
   const now = Date.now();
+  const defaultDuration = 300; // 10 seconds at 30fps
   return {
     id: `comp_root_${now}`,
     type: 'composition',
@@ -122,7 +123,9 @@ function createRootComposition(): CompositionAsset {
     intrinsicHeight: 1080,
     dimensions: { width: 1920, height: 1080 },
     fps: 30,
-    durationFrames: 300, // 10 seconds at 30fps
+    durationFrames: defaultDuration,
+    workAreaStart: 0,
+    workAreaEnd: defaultDuration,
     createdAt: now,
     updatedAt: now,
     graph: {

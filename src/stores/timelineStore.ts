@@ -1,10 +1,13 @@
 import { create } from 'zustand';
+import { useAssetStore } from './assetStore';
+import { useCompositionStore } from './compositionStore';
+import { isCompositionAsset } from '../types/assets';
 
 interface TimelineState {
   // Current frame position
   currentFrame: number;
 
-  // Frame range
+  // Frame range (synced with active composition's work area)
   frameStart: number;
   frameEnd: number;
 
@@ -27,6 +30,9 @@ interface TimelineState {
   prevFrame: () => void;
   goToStart: () => void;
   goToEnd: () => void;
+
+  // Composition sync
+  syncWithComposition: () => void;
 }
 
 export const useTimelineStore = create<TimelineState>((set, get) => ({
@@ -54,6 +60,20 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // Clamp current frame to new range
       currentFrame: Math.max(start, Math.min(end, currentFrame))
     });
+
+    // Update the active composition's work area
+    const compositionId = useCompositionStore.getState().activeCompositionId;
+    if (compositionId) {
+      const asset = useAssetStore.getState().getAsset(compositionId);
+      if (asset && isCompositionAsset(asset)) {
+        useAssetStore.getState().updateAsset(compositionId, {
+          workAreaStart: start,
+          workAreaEnd: end,
+          // Also update durationFrames if end is larger
+          durationFrames: Math.max(asset.durationFrames, end),
+        });
+      }
+    }
   },
 
   setIsPlaying: (playing) => set({ isPlaying: playing }),
@@ -98,4 +118,50 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const { frameEnd } = get();
     set({ currentFrame: frameEnd });
   },
+
+  // Sync timeline with the active composition's work area
+  syncWithComposition: () => {
+    const compositionId = useCompositionStore.getState().activeCompositionId;
+    if (!compositionId) return;
+
+    const asset = useAssetStore.getState().getAsset(compositionId);
+    if (!asset || !isCompositionAsset(asset)) return;
+
+    const { currentFrame } = get();
+
+    // Handle legacy compositions that don't have workAreaStart/workAreaEnd
+    const newStart = asset.workAreaStart ?? 0;
+    const newEnd = asset.workAreaEnd ?? asset.durationFrames;
+
+    // If the composition is missing these fields, update it
+    if (asset.workAreaStart === undefined || asset.workAreaEnd === undefined) {
+      useAssetStore.getState().updateAsset(compositionId, {
+        workAreaStart: newStart,
+        workAreaEnd: newEnd,
+      });
+    }
+
+    set({
+      frameStart: newStart,
+      frameEnd: newEnd,
+      fps: asset.fps,
+      // Clamp current frame to new range
+      currentFrame: Math.max(newStart, Math.min(newEnd, currentFrame)),
+    });
+  },
 }));
+
+// =============================================================================
+// Initialization Helper
+// =============================================================================
+
+/**
+ * Initialize timeline from the active composition
+ * Call this after composition system is initialized
+ */
+export function initializeTimelineFromComposition(): void {
+  // Small delay to ensure composition store is ready
+  setTimeout(() => {
+    useTimelineStore.getState().syncWithComposition();
+  }, 10);
+}
