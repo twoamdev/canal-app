@@ -74,11 +74,11 @@ export async function loadImageAsset(asset: ImageAsset): Promise<ImageBitmap> {
 }
 
 /**
- * Load a frame from any media asset (video or image)
- * For images, frameIndex is ignored
+ * Load a frame from any renderable asset (video, image, or shape)
+ * For images and shapes, frameIndex is ignored
  */
 export async function loadAssetFrame(
-  asset: VideoAsset | ImageAsset,
+  asset: VideoAsset | ImageAsset | ShapeAsset,
   frameIndex: number = 0
 ): Promise<ImageBitmap> {
   if (isVideoAsset(asset)) {
@@ -87,6 +87,10 @@ export async function loadAssetFrame(
 
   if (isImageAsset(asset)) {
     return loadImageAsset(asset);
+  }
+
+  if (isShapeAsset(asset)) {
+    return renderShapeAsset(asset);
   }
 
   throw new Error(`Cannot load frame from asset type: ${(asset as Asset).type}`);

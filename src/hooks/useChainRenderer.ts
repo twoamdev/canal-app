@@ -12,7 +12,7 @@ import { useCompositionStore } from '../stores/compositionStore';
 import { useTimelineStore } from '../stores/timelineStore';
 import { loadAssetFrame, mapGlobalFrameToSource, globalFrameCache } from '../utils/asset-loader';
 import { findUpstreamChain, type SceneGraph } from '../utils/scene-graph-utils';
-import { isVideoAsset, isImageAsset } from '../types/assets';
+import { isRenderableAsset } from '../types/assets';
 import { WebGLContext } from '../gpu/WebGLContext';
 import { TexturePool } from '../gpu/TexturePool';
 import { RenderPipeline, type RenderNode } from '../gpu/RenderPipeline';
@@ -165,8 +165,8 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
     // Update dimensions from source asset
     const assetDimensions = { width: sourceAsset.intrinsicWidth, height: sourceAsset.intrinsicHeight };
 
-    // Only render video/image assets
-    if (!isVideoAsset(sourceAsset) && !isImageAsset(sourceAsset)) {
+    // Only render assets that can be converted to bitmaps (video, image, shape)
+    if (!isRenderableAsset(sourceAsset)) {
       setState((s) => ({ ...s, isLoading: false, error: 'Unsupported asset type', hasUpstream: true, dimensions: assetDimensions }));
       return;
     }

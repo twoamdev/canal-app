@@ -205,6 +205,14 @@ export function isMediaAsset(asset: Asset): asset is VideoAsset | ImageAsset {
 }
 
 /**
+ * Check if an asset can be rendered through the WebGL effects pipeline
+ * (assets that have a bitmap representation)
+ */
+export function isRenderableAsset(asset: Asset): asset is VideoAsset | ImageAsset | ShapeAsset {
+  return asset.type === 'video' || asset.type === 'image' || asset.type === 'shape';
+}
+
+/**
  * Check if an asset is still loading/processing
  */
 export function isAssetLoading(asset: Asset): boolean {
