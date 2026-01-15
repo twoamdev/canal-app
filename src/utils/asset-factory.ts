@@ -445,13 +445,30 @@ async function getImageDimensions(
 // Shape Asset Creation
 // =============================================================================
 
+import {
+  parseSVGString,
+  isSVGFile,
+  isSVGString,
+  normalizeBounds,
+  translatePathData,
+  type ParsedSVG,
+} from './svg-parser';
+
 export interface CreateShapeAssetOptions {
   /** Fill color (CSS color string) */
   fillColor?: string;
+  /** Fill opacity (0-1) */
+  fillOpacity?: number;
   /** Stroke color (CSS color string) */
   strokeColor?: string;
   /** Stroke width */
   strokeWidth?: number;
+  /** Stroke opacity (0-1) */
+  strokeOpacity?: number;
+  /** Stroke line cap */
+  strokeLinecap?: 'butt' | 'round' | 'square';
+  /** Stroke line join */
+  strokeLinejoin?: 'miter' | 'round' | 'bevel';
   /** Fill rule */
   fillRule?: 'evenodd' | 'nonzero';
 }
@@ -467,8 +484,12 @@ export function createShapeAsset(
 ): ShapeAsset {
   const {
     fillColor = '#ffffff',
+    fillOpacity,
     strokeColor,
     strokeWidth,
+    strokeOpacity,
+    strokeLinecap,
+    strokeLinejoin,
     fillRule = 'nonzero',
   } = options;
 
@@ -486,11 +507,173 @@ export function createShapeAsset(
       pathData,
       fillRule,
       fillColor,
+      fillOpacity,
       strokeColor,
       strokeWidth,
+      strokeOpacity,
+      strokeLinecap,
+      strokeLinejoin,
     },
   };
 }
+
+/**
+ * Create a placeholder ShapeAsset for an SVG being processed
+ */
+export function createPlaceholderShapeAsset(
+  name: string,
+  id?: string
+): ShapeAsset {
+  const now = Date.now();
+  const assetId = id ?? generateAssetId('shape');
+
+  return {
+    id: assetId,
+    type: 'shape',
+    name,
+    intrinsicWidth: 100,
+    intrinsicHeight: 100,
+    createdAt: now,
+    updatedAt: now,
+    loadingState: {
+      isLoading: true,
+      progress: 0,
+    },
+    metadata: {
+      pathData: '',
+      fillColor: '#ffffff',
+    },
+  };
+}
+
+/**
+ * Create a ShapeAsset from a parsed SVG
+ */
+export function createShapeAssetFromParsedSVG(
+  name: string,
+  parsed: ParsedSVG,
+  originalSVG?: string
+): ShapeAsset {
+  const now = Date.now();
+
+  console.log(`[SVG] Creating shape from ${parsed.paths.length} paths`);
+  for (let i = 0; i < parsed.paths.length; i++) {
+    const p = parsed.paths[i];
+    console.log(`[SVG] Path ${i}: fill=${p.style.fill}, bounds=${JSON.stringify(p.bounds)}`);
+  }
+
+  // Normalize bounds to start at origin
+  const { normalizedBounds, offset } = normalizeBounds(parsed.bounds);
+
+  // If there's only one path, use simple format
+  if (parsed.paths.length === 1) {
+    const path = parsed.paths[0];
+    const translatedPathData = translatePathData(path.pathData, offset.x, offset.y);
+
+    return {
+      id: generateAssetId('shape'),
+      type: 'shape',
+      name,
+      intrinsicWidth: Math.max(1, Math.ceil(normalizedBounds.width)),
+      intrinsicHeight: Math.max(1, Math.ceil(normalizedBounds.height)),
+      createdAt: now,
+      updatedAt: now,
+      metadata: {
+        pathData: translatedPathData,
+        fillColor: path.style.fill ?? '#000000',
+        fillOpacity: path.style.fillOpacity,
+        fillRule: path.style.fillRule,
+        strokeColor: path.style.stroke,
+        strokeWidth: path.style.strokeWidth,
+        strokeOpacity: path.style.strokeOpacity,
+        strokeLinecap: path.style.strokeLinecap,
+        strokeLinejoin: path.style.strokeLinejoin,
+        strokeMiterlimit: path.style.strokeMiterlimit,
+        strokeDasharray: path.style.strokeDasharray,
+        strokeDashoffset: path.style.strokeDashoffset,
+        originalSVG,
+      },
+    };
+  }
+
+  // Multiple paths - store each with its own style
+  const paths = parsed.paths.map((path) => {
+    const translatedPathData = translatePathData(path.pathData, offset.x, offset.y);
+    return {
+      pathData: translatedPathData,
+      fillColor: path.style.fill,
+      fillOpacity: path.style.fillOpacity,
+      fillRule: path.style.fillRule,
+      strokeColor: path.style.stroke,
+      strokeWidth: path.style.strokeWidth,
+      strokeOpacity: path.style.strokeOpacity,
+      strokeLinecap: path.style.strokeLinecap,
+      strokeLinejoin: path.style.strokeLinejoin,
+      strokeMiterlimit: path.style.strokeMiterlimit,
+      strokeDasharray: path.style.strokeDasharray,
+      strokeDashoffset: path.style.strokeDashoffset,
+    };
+  });
+
+  // Combined path data for simple rendering
+  const combinedPathData = paths.map((p) => p.pathData).join(' ');
+
+  // Use first path's style as default
+  const firstStyle = parsed.paths[0]?.style ?? {};
+
+  return {
+    id: generateAssetId('shape'),
+    type: 'shape',
+    name,
+    intrinsicWidth: Math.max(1, Math.ceil(normalizedBounds.width)),
+    intrinsicHeight: Math.max(1, Math.ceil(normalizedBounds.height)),
+    createdAt: now,
+    updatedAt: now,
+    metadata: {
+      pathData: combinedPathData,
+      fillColor: firstStyle.fill ?? '#000000',
+      fillOpacity: firstStyle.fillOpacity,
+      fillRule: firstStyle.fillRule,
+      strokeColor: firstStyle.stroke,
+      strokeWidth: firstStyle.strokeWidth,
+      strokeOpacity: firstStyle.strokeOpacity,
+      strokeLinecap: firstStyle.strokeLinecap,
+      strokeLinejoin: firstStyle.strokeLinejoin,
+      strokeMiterlimit: firstStyle.strokeMiterlimit,
+      strokeDasharray: firstStyle.strokeDasharray,
+      strokeDashoffset: firstStyle.strokeDashoffset,
+      originalSVG,
+      paths,
+    },
+  };
+}
+
+/**
+ * Create a ShapeAsset from an SVG file
+ */
+export async function createShapeAssetFromSVGFile(file: File): Promise<ShapeAsset> {
+  const svgText = await file.text();
+  const parsed = parseSVGString(svgText);
+
+  // Use filename without extension as name
+  const name = file.name.replace(/\.svg$/i, '');
+
+  return createShapeAssetFromParsedSVG(name, parsed, svgText);
+}
+
+/**
+ * Create a ShapeAsset from an SVG string
+ */
+export function createShapeAssetFromSVGString(
+  svgString: string,
+  name: string = 'Pasted Shape'
+): ShapeAsset {
+  const parsed = parseSVGString(svgString);
+  return createShapeAssetFromParsedSVG(name, parsed, svgString);
+}
+
+// Re-export SVG utilities for external use
+export { isSVGFile, isSVGString };
 
 // =============================================================================
 // Composition Asset Creation

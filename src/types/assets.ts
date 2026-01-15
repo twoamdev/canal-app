@@ -93,16 +93,47 @@ export interface ImageAsset extends BaseAsset {
 // =============================================================================
 
 export interface ShapeAssetMetadata {
-  /** SVG path d="" attribute */
+  /** SVG path d="" attribute (may contain multiple paths separated by newlines) */
   pathData: string;
   /** Fill rule for the path */
   fillRule?: 'evenodd' | 'nonzero';
-  /** Fill color (CSS color string) */
+  /** Fill color (CSS color string or 'none') */
   fillColor?: string;
-  /** Stroke color (CSS color string) */
+  /** Fill opacity (0-1) */
+  fillOpacity?: number;
+  /** Stroke color (CSS color string or 'none') */
   strokeColor?: string;
   /** Stroke width */
   strokeWidth?: number;
+  /** Stroke opacity (0-1) */
+  strokeOpacity?: number;
+  /** Stroke line cap */
+  strokeLinecap?: 'butt' | 'round' | 'square';
+  /** Stroke line join */
+  strokeLinejoin?: 'miter' | 'round' | 'bevel';
+  /** Stroke miter limit */
+  strokeMiterlimit?: number;
+  /** Stroke dash array */
+  strokeDasharray?: number[];
+  /** Stroke dash offset */
+  strokeDashoffset?: number;
+  /** Original SVG source (for reference) */
+  originalSVG?: string;
+  /** Multiple paths with individual styles (for complex SVGs) */
+  paths?: Array<{
+    pathData: string;
+    fillColor?: string;
+    fillOpacity?: number;
+    fillRule?: 'evenodd' | 'nonzero';
+    strokeColor?: string;
+    strokeWidth?: number;
+    strokeOpacity?: number;
+    strokeLinecap?: 'butt' | 'round' | 'square';
+    strokeLinejoin?: 'miter' | 'round' | 'bevel';
+    strokeMiterlimit?: number;
+    strokeDasharray?: number[];
+    strokeDashoffset?: number;
+  }>;
 }
 
 export interface ShapeAsset extends BaseAsset {

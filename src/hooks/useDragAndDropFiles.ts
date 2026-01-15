@@ -21,9 +21,12 @@ import {
   createAssetFromFile,
   createPlaceholderAsset,
   createPlaceholderSequenceAsset,
+  createPlaceholderShapeAsset,
   createImageSequenceAsset,
+  createShapeAssetFromSVGFile,
   isVideoFile,
   isImageFile,
+  isSVGFile,
 } from '../utils/asset-factory';
 import { createSourceNode, type SourceNode } from '../types/scene-graph';
 import { getAssetFrameCount } from '../types/assets';
@@ -101,6 +104,7 @@ export function useDragAndDropFiles() {
       // Track all items to process
       const processingFiles: Array<{ file: File; assetId: string; nodeId: string }> = [];
       const processingSequences: Array<{ sequence: DetectedSequence; assetId: string; nodeId: string }> = [];
+      const processingSVGs: Array<{ file: File; assetId: string; nodeId: string }> = [];
 
       // Check for folder drops using dataTransfer.items
       const items = event.dataTransfer.items;
@@ -155,14 +159,91 @@ export function useDragAndDropFiles() {
         } else if (entry?.isFile) {
           // It's a single file
           const file = item.getAsFile();
-          if (file && (isVideoFile(file) || isImageFile(file))) {
-            const placeholderAsset = createPlaceholderAsset(file);
-            addAsset(placeholderAsset);
-
+          if (file) {
             const offsetPosition = {
               x: flowPosition.x + nodeIndex * 250,
               y: flowPosition.y + nodeIndex * 50,
             };
+
+            if (isSVGFile(file)) {
+              // SVG file - create shape asset
+              const placeholderAsset = createPlaceholderShapeAsset(file.name.replace(/\.svg$/i, ''));
+              addAsset(placeholderAsset);
+
+              const sourceNode = createSourceNode(
+                placeholderAsset.id,
+                placeholderAsset.name,
+                1, // Shapes are single frame
+                offsetPosition
+              );
+              addNode(sourceNode);
+
+              processingSVGs.push({
+                file,
+                assetId: placeholderAsset.id,
+                nodeId: sourceNode.id,
+              });
+
+              nodeIndex++;
+              console.log(`[DragAndDrop] Created placeholder node for SVG: ${file.name}`);
+            } else if (isVideoFile(file) || isImageFile(file)) {
+              const placeholderAsset = createPlaceholderAsset(file);
+              addAsset(placeholderAsset);
+
+              const defaultFrameCount = isVideoFile(file) ? 300 : 1;
+              const sourceNode = createSourceNode(
+                placeholderAsset.id,
+                placeholderAsset.name,
+                defaultFrameCount,
+                offsetPosition
+              );
+              addNode(sourceNode);
+
+              processingFiles.push({
+                file,
+                assetId: placeholderAsset.id,
+                nodeId: sourceNode.id,
+              });
+
+              nodeIndex++;
+              console.log(`[DragAndDrop] Created placeholder node for: ${file.name}`);
+            }
+          }
+        }
+      }
+
+      // Fallback: If no items were found via webkitGetAsEntry, use files array
+      if (processingFiles.length === 0 && processingSequences.length === 0 && processingSVGs.length === 0) {
+        const files = Array.from(event.dataTransfer.files);
+
+        for (const file of files) {
+          const offsetPosition = {
+            x: flowPosition.x + nodeIndex * 250,
+            y: flowPosition.y + nodeIndex * 50,
+          };
+
+          if (isSVGFile(file)) {
+            const placeholderAsset = createPlaceholderShapeAsset(file.name.replace(/\.svg$/i, ''));
+            addAsset(placeholderAsset);
+
+            const sourceNode = createSourceNode(
+              placeholderAsset.id,
+              placeholderAsset.name,
+              1,
+              offsetPosition
+            );
+            addNode(sourceNode);
+
+            processingSVGs.push({
+              file,
+              assetId: placeholderAsset.id,
+              nodeId: sourceNode.id,
+            });
+
+            nodeIndex++;
+          } else if (isVideoFile(file) || isImageFile(file)) {
+            const placeholderAsset = createPlaceholderAsset(file);
+            addAsset(placeholderAsset);
 
             const defaultFrameCount = isVideoFile(file) ? 300 : 1;
             const sourceNode = createSourceNode(
@@ -180,50 +261,14 @@ export function useDragAndDropFiles() {
             });
 
             nodeIndex++;
-            console.log(`[DragAndDrop] Created placeholder node for: ${file.name}`);
           }
         }
       }
 
-      // Fallback: If no items were found via webkitGetAsEntry, use files array
-      if (processingFiles.length === 0 && processingSequences.length === 0) {
-        const files = Array.from(event.dataTransfer.files);
-        const supportedFiles = files.filter(
-          (file) => isVideoFile(file) || isImageFile(file)
-        );
-
-        for (const file of supportedFiles) {
-          const placeholderAsset = createPlaceholderAsset(file);
-          addAsset(placeholderAsset);
-
-          const offsetPosition = {
-            x: flowPosition.x + nodeIndex * 250,
-            y: flowPosition.y + nodeIndex * 50,
-          };
-
-          const defaultFrameCount = isVideoFile(file) ? 300 : 1;
-          const sourceNode = createSourceNode(
-            placeholderAsset.id,
-            placeholderAsset.name,
-            defaultFrameCount,
-            offsetPosition
-          );
-          addNode(sourceNode);
-
-          processingFiles.push({
-            file,
-            assetId: placeholderAsset.id,
-            nodeId: sourceNode.id,
-          });
-
-          nodeIndex++;
-        }
-      }
-
-      const totalItems = processingFiles.length + processingSequences.length;
+      const totalItems = processingFiles.length + processingSequences.length + processingSVGs.length;
 
       if (totalItems === 0) {
-        console.warn('No supported files or image sequences dropped');
+        console.warn('No supported files, image sequences, or SVGs dropped');
         return;
       }
 
@@ -370,6 +415,62 @@ export function useDragAndDropFiles() {
           setState((prev) => ({
             ...prev,
             error: `Failed to process sequence: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          }));
+        }
+      }
+
+      // Process SVG files
+      for (const { file, assetId, nodeId } of processingSVGs) {
+        try {
+          updateAsset(assetId, {
+            loadingState: { isLoading: true, progress: 0.5 },
+          });
+
+          const processedAsset = await createShapeAssetFromSVGFile(file);
+
+          updateAsset(assetId, {
+            intrinsicWidth: processedAsset.intrinsicWidth,
+            intrinsicHeight: processedAsset.intrinsicHeight,
+            metadata: processedAsset.metadata,
+            loadingState: undefined,
+          });
+
+          // Shapes are single frame but can be extended
+          updateNode(nodeId, (node) => {
+            if (node.type !== 'source') return node;
+            return {
+              ...node,
+              layer: {
+                ...node.layer,
+                timeRange: {
+                  inFrame: 0,
+                  outFrame: 1,
+                  sourceOffset: 0,
+                },
+              },
+            } as SourceNode;
+          });
+
+          completed++;
+          setState((prev) => ({
+            ...prev,
+            progress: { current: completed, total: totalItems },
+          }));
+
+          console.log(`[DragAndDrop] Finished processing SVG: ${file.name} (${processedAsset.intrinsicWidth}x${processedAsset.intrinsicHeight})`);
+        } catch (error) {
+          console.error(`Failed to process SVG ${file.name}:`, error);
+
+          updateAsset(assetId, {
+            loadingState: {
+              isLoading: false,
+              error: error instanceof Error ? error.message : 'Processing failed',
+            },
+          });
+
+          setState((prev) => ({
+            ...prev,
+            error: `Failed to process SVG ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`,
           }));
         }
       }

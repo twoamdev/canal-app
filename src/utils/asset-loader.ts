@@ -97,34 +97,125 @@ export async function loadAssetFrame(
 // =============================================================================
 
 /**
+ * Helper to render a single path with style
+ */
+function renderPath(
+  ctx: OffscreenCanvasRenderingContext2D,
+  pathData: string,
+  style: {
+    fillColor?: string;
+    fillOpacity?: number;
+    fillRule?: 'evenodd' | 'nonzero';
+    strokeColor?: string;
+    strokeWidth?: number;
+    strokeOpacity?: number;
+    strokeLinecap?: 'butt' | 'round' | 'square';
+    strokeLinejoin?: 'miter' | 'round' | 'bevel';
+    strokeMiterlimit?: number;
+    strokeDasharray?: number[];
+    strokeDashoffset?: number;
+  }
+): void {
+  const path = new Path2D(pathData);
+
+  // Apply fill
+  if (style.fillColor && style.fillColor !== 'none') {
+    ctx.save();
+    ctx.fillStyle = style.fillColor;
+    if (style.fillOpacity !== undefined && style.fillOpacity < 1) {
+      ctx.globalAlpha = style.fillOpacity;
+    }
+    ctx.fill(path, style.fillRule ?? 'nonzero');
+    ctx.restore();
+  }
+
+  // Apply stroke
+  if (style.strokeColor && style.strokeColor !== 'none' && style.strokeWidth) {
+    ctx.save();
+    ctx.strokeStyle = style.strokeColor;
+    ctx.lineWidth = style.strokeWidth;
+
+    if (style.strokeOpacity !== undefined && style.strokeOpacity < 1) {
+      ctx.globalAlpha = style.strokeOpacity;
+    }
+
+    if (style.strokeLinecap) {
+      ctx.lineCap = style.strokeLinecap;
+    }
+
+    if (style.strokeLinejoin) {
+      ctx.lineJoin = style.strokeLinejoin;
+    }
+
+    if (style.strokeMiterlimit !== undefined) {
+      ctx.miterLimit = style.strokeMiterlimit;
+    }
+
+    if (style.strokeDasharray && style.strokeDasharray.length > 0) {
+      ctx.setLineDash(style.strokeDasharray);
+    }
+
+    if (style.strokeDashoffset !== undefined) {
+      ctx.lineDashOffset = style.strokeDashoffset;
+    }
+
+    ctx.stroke(path);
+    ctx.restore();
+  }
+}
+
+/**
  * Render a ShapeAsset to an ImageBitmap
  */
 export async function renderShapeAsset(asset: ShapeAsset): Promise<ImageBitmap> {
-  const { pathData, fillRule, fillColor, strokeColor, strokeWidth } =
-    asset.metadata;
+  const metadata = asset.metadata;
 
   // Create an OffscreenCanvas
-  const canvas = new OffscreenCanvas(asset.intrinsicWidth, asset.intrinsicHeight);
+  const canvas = new OffscreenCanvas(
+    Math.max(1, asset.intrinsicWidth),
+    Math.max(1, asset.intrinsicHeight)
+  );
   const ctx = canvas.getContext('2d');
 
   if (!ctx) {
     throw new Error('Failed to get canvas context');
   }
 
-  // Create path
-  const path = new Path2D(pathData);
-
-  // Apply fill
-  if (fillColor) {
-    ctx.fillStyle = fillColor;
-    ctx.fill(path, fillRule);
-  }
-
-  // Apply stroke
-  if (strokeColor && strokeWidth) {
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = strokeWidth;
-    ctx.stroke(path);
+  // If we have multiple paths with individual styles, render each one
+  if (metadata.paths && metadata.paths.length > 0) {
+    console.log(`[Shape] Rendering ${metadata.paths.length} paths`);
+    for (let i = 0; i < metadata.paths.length; i++) {
+      const pathInfo = metadata.paths[i];
+      console.log(`[Shape] Path ${i}: fill=${pathInfo.fillColor}, pathData length=${pathInfo.pathData?.length}`);
+      renderPath(ctx, pathInfo.pathData, {
+        fillColor: pathInfo.fillColor,
+        fillOpacity: pathInfo.fillOpacity,
+        fillRule: pathInfo.fillRule,
+        strokeColor: pathInfo.strokeColor,
+        strokeWidth: pathInfo.strokeWidth,
+        strokeOpacity: pathInfo.strokeOpacity,
+        strokeLinecap: pathInfo.strokeLinecap,
+        strokeLinejoin: pathInfo.strokeLinejoin,
+        strokeMiterlimit: pathInfo.strokeMiterlimit,
+        strokeDasharray: pathInfo.strokeDasharray,
+        strokeDashoffset: pathInfo.strokeDashoffset,
+      });
+    }
+  } else {
+    // Single path with combined style
+    renderPath(ctx, metadata.pathData, {
+      fillColor: metadata.fillColor,
+      fillOpacity: metadata.fillOpacity,
+      fillRule: metadata.fillRule,
+      strokeColor: metadata.strokeColor,
+      strokeWidth: metadata.strokeWidth,
+      strokeOpacity: metadata.strokeOpacity,
+      strokeLinecap: metadata.strokeLinecap,
+      strokeLinejoin: metadata.strokeLinejoin,
+      strokeMiterlimit: metadata.strokeMiterlimit,
+      strokeDasharray: metadata.strokeDasharray,
+      strokeDashoffset: metadata.strokeDashoffset,
+    });
   }
 
   // Convert to ImageBitmap

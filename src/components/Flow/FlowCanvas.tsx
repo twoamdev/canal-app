@@ -11,6 +11,7 @@ import {
 } from '@xyflow/react'
 import { useDragAndDropFiles } from '../../hooks/useDragAndDropFiles';
 import { useCanvasHotkeys } from '../../hooks/useCanvasHotkeys';
+import { useClipboardPaste } from '../../hooks/useClipboardPaste';
 import { useGraphStore, useGraphNodes, useGraphEdges } from '../../stores/graphStore';
 import { initializeCompositionSystem } from '../../stores/compositionStore';
 import { useCommandMenuStore } from '../../stores/commandMenuStore';
@@ -22,6 +23,12 @@ import { ZoomInvariantEdge, ZoomInvariantConnectionLine, ClickConnectionLine } f
 // Component to initialize hotkeys inside ReactFlow context
 function CanvasHotkeys() {
     useCanvasHotkeys();
+    return null;
+}
+
+// Component to handle clipboard paste inside ReactFlow context
+function ClipboardHandler() {
+    useClipboardPaste();
     return null;
 }
 
@@ -164,7 +171,8 @@ export function FlowCanvas() {
                 proOptions={{ hideAttribution: true }}
             >
                 <CanvasHotkeys />
-               <Background color="hsl(var(--muted-foreground) / 0.3)" gap={20} />
+                <ClipboardHandler />
+                <Background color="hsl(var(--muted-foreground) / 0.3)" gap={20} />
                 <NodeCommandMenu
                     open={commandMenuOpen}
                     onOpenChange={handleCommandMenuOpenChange}
