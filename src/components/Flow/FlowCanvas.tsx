@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import {
     ReactFlow,
     SelectionMode,
@@ -78,6 +78,26 @@ export function FlowCanvas() {
 
     const { handleFileDrop, handleFileDragOver } = useDragAndDropFiles();
     const { fitView, screenToFlowPosition } = useReactFlow();
+
+    // Track if we've done the initial fitView
+    const hasInitialFitRef = useRef(false);
+
+    // Fit view to all nodes once they're loaded from persistence
+    useEffect(() => {
+        // Only run once, when nodes first become available
+        if (hasInitialFitRef.current || nodes.length === 0) return;
+
+        // Small delay to ensure nodes are fully rendered with correct dimensions
+        const timeoutId = setTimeout(() => {
+            fitView({
+                padding: 0.2,
+                duration: 0,
+            });
+            hasInitialFitRef.current = true;
+        }, 50);
+
+        return () => clearTimeout(timeoutId);
+    }, [nodes.length, fitView]);
 
     // Track mouse position when connecting
     const handleMouseMove = useCallback((event: React.MouseEvent) => {

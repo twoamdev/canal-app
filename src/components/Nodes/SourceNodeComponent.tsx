@@ -311,7 +311,7 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
   const renderShapePreview = () => {
     if (!asset || !isShapeAsset(asset)) return null;
 
-    const { pathData, fillColor, strokeColor, strokeWidth, fillRule } = asset.metadata;
+    const { pathData, fillColor, strokeColor, strokeWidth, fillRule, paths } = asset.metadata;
     const width = asset.intrinsicWidth;
     const height = asset.intrinsicHeight;
 
@@ -329,13 +329,35 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
           viewBox={`0 0 ${width} ${height}`}
           className="w-full h-full"
         >
-          <path
-            d={pathData}
-            fill={fillColor ?? '#ffffff'}
-            stroke={strokeColor}
-            strokeWidth={strokeWidth}
-            fillRule={fillRule}
-          />
+          {paths && paths.length > 0 ? (
+            // Multi-path SVG: render each path with its own style
+            paths.map((p, i) => (
+              <path
+                key={i}
+                d={p.pathData}
+                fill={p.fillColor ?? 'none'}
+                fillOpacity={p.fillOpacity}
+                fillRule={p.fillRule}
+                stroke={p.strokeColor}
+                strokeWidth={p.strokeWidth}
+                strokeOpacity={p.strokeOpacity}
+                strokeLinecap={p.strokeLinecap}
+                strokeLinejoin={p.strokeLinejoin}
+                strokeMiterlimit={p.strokeMiterlimit}
+                strokeDasharray={p.strokeDasharray?.join(' ')}
+                strokeDashoffset={p.strokeDashoffset}
+              />
+            ))
+          ) : (
+            // Single path fallback
+            <path
+              d={pathData}
+              fill={fillColor ?? '#ffffff'}
+              stroke={strokeColor}
+              strokeWidth={strokeWidth}
+              fillRule={fillRule}
+            />
+          )}
         </svg>
       </div>
     );
