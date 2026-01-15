@@ -32,8 +32,14 @@ export async function loadVideoFrame(
   asset: VideoAsset,
   frameIndex: number
 ): Promise<ImageBitmap> {
-  const { fileHandleId, extractedFrameFormat, framesExtracted, frameCount } =
-    asset.metadata;
+  const {
+    fileHandleId,
+    extractedFrameFormat,
+    framesExtracted,
+    frameCount,
+    isImageSequence,
+    sequenceFramePaths,
+  } = asset.metadata;
 
   if (!framesExtracted || !extractedFrameFormat) {
     throw new Error('Video frames have not been extracted yet');
@@ -42,7 +48,19 @@ export async function loadVideoFrame(
   // Clamp frame index to valid range
   const clampedIndex = Math.max(0, Math.min(frameIndex, frameCount - 1));
 
-  const framePath = getFramePath(fileHandleId, clampedIndex, extractedFrameFormat);
+  let framePath: string;
+
+  if (isImageSequence && sequenceFramePaths) {
+    // For image sequences, look up the path from the mapping
+    framePath = sequenceFramePaths[clampedIndex];
+    if (!framePath) {
+      throw new Error(`Frame ${clampedIndex} not found in image sequence`);
+    }
+  } else {
+    // For extracted video frames, compute the path
+    framePath = getFramePath(fileHandleId, clampedIndex, extractedFrameFormat);
+  }
+
   const file = await opfsManager.getFile(framePath);
   return createImageBitmap(file);
 }

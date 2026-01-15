@@ -45,15 +45,15 @@ export interface BaseAsset {
 // =============================================================================
 
 export interface VideoAssetMetadata {
-  /** OPFS path to the video file */
+  /** OPFS path to the video file (or base path for sequences) */
   fileHandleId: string;
   /** Duration in seconds */
   duration: number;
   /** Frames per second */
   fps: number;
-  /** MP4Box video track ID for extraction */
+  /** MP4Box video track ID for extraction (0 for image sequences) */
   videoTrackId: number;
-  /** Codec MIME type (e.g., "avc1.42E01E") */
+  /** Codec MIME type (e.g., "avc1.42E01E") or image MIME type for sequences */
   mimeType: string;
   /** Total number of frames */
   frameCount: number;
@@ -61,6 +61,10 @@ export interface VideoAssetMetadata {
   extractedFrameFormat?: 'webp' | 'png' | 'jpeg';
   /** Whether frames have been extracted */
   framesExtracted?: boolean;
+  /** Whether this is an image sequence (not a decoded video) */
+  isImageSequence?: boolean;
+  /** For image sequences: map of frame index to OPFS path */
+  sequenceFramePaths?: Record<number, string>;
 }
 
 export interface VideoAsset extends BaseAsset {

@@ -225,6 +225,151 @@ export function createVideoAssetWithMetadata(
 }
 
 // =============================================================================
+// Image Sequence Asset Creation
+// =============================================================================
+
+import type { DetectedSequence } from './image-sequence';
+import { getSequenceDisplayName } from './image-sequence';
+
+export interface CreateImageSequenceAssetOptions {
+  /** Custom name for the asset */
+  name?: string;
+  /** Assumed FPS for the sequence (default: 24) */
+  fps?: number;
+  /** Progress callback */
+  onProgress?: (current: number, total: number) => void;
+}
+
+/**
+ * Create a placeholder VideoAsset for an image sequence that's being processed
+ */
+export function createPlaceholderSequenceAsset(
+  sequence: DetectedSequence,
+  id?: string
+): VideoAsset {
+  const now = Date.now();
+  const assetId = id ?? generateAssetId('seq');
+  const name = getSequenceDisplayName(sequence);
+
+  return {
+    id: assetId,
+    type: 'video',
+    name,
+    intrinsicWidth: 1920, // Placeholder - will be updated from first frame
+    intrinsicHeight: 1080,
+    createdAt: now,
+    updatedAt: now,
+    loadingState: {
+      isLoading: true,
+      progress: 0,
+    },
+    metadata: {
+      fileHandleId: '', // Will be set when processing completes
+      duration: sequence.frameCount / 24, // Estimated at 24fps
+      fps: 24,
+      videoTrackId: 0,
+      mimeType: `image/${sequence.extension}`,
+      frameCount: sequence.frameCount,
+      framesExtracted: false,
+      isImageSequence: true,
+    },
+  };
+}
+
+/**
+ * Create a VideoAsset from an image sequence
+ * Stores all frames to OPFS and creates the asset
+ */
+export async function createImageSequenceAsset(
+  sequence: DetectedSequence,
+  options: CreateImageSequenceAssetOptions = {}
+): Promise<VideoAsset> {
+  const { name, fps = 24, onProgress } = options;
+  const displayName = name ?? getSequenceDisplayName(sequence);
+
+  // Store all frames to OPFS and track their paths
+  const sequenceFramePaths: Record<number, string> = {};
+  const basePath = `sequences/${Date.now()}-${sequence.baseName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+  let width = 0;
+  let height = 0;
+
+  for (let i = 0; i < sequence.files.length; i++) {
+    const seqFile = sequence.files[i];
+    const frameIndex = i; // Use sequential index for consistent frame numbering
+
+    // Store the frame
+    const framePath = `${basePath}/frame_${frameIndex.toString().padStart(6, '0')}.${sequence.extension}`;
+    await opfsManager.storeFile(seqFile.file, framePath);
+
+    sequenceFramePaths[frameIndex] = framePath;
+
+    // Get dimensions from first frame
+    if (i === 0) {
+      const dimensions = await getImageDimensionsFromFile(seqFile.file);
+      width = dimensions.width;
+      height = dimensions.height;
+    }
+
+    onProgress?.(i + 1, sequence.files.length);
+  }
+
+  const frameCount = sequence.files.length;
+  const duration = frameCount / fps;
+
+  const now = Date.now();
+
+  return {
+    id: generateAssetId('seq'),
+    type: 'video',
+    name: displayName,
+    intrinsicWidth: width,
+    intrinsicHeight: height,
+    createdAt: now,
+    updatedAt: now,
+    metadata: {
+      fileHandleId: basePath,
+      duration,
+      fps,
+      videoTrackId: 0, // Not applicable for sequences
+      mimeType: `image/${sequence.extension}`,
+      frameCount,
+      extractedFrameFormat: sequence.extension as 'png' | 'jpeg' | 'webp',
+      framesExtracted: true,
+      isImageSequence: true,
+      sequenceFramePaths,
+    },
+  };
+}
+
+/**
+ * Get image dimensions from a File object
+ */
+async function getImageDimensionsFromFile(
+  file: File
+): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve({
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+      });
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Failed to load image'));
+    };
+
+    img.src = url;
+  });
+}
+
+// =============================================================================
 // Image Asset Creation
 // =============================================================================
 
