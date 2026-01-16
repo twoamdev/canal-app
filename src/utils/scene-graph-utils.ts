@@ -8,10 +8,13 @@ import type {
   SceneNode,
   SourceNode,
   OperationNode,
+  GroupNode,
   Connection,
   OperationType,
+  Layer,
 } from '../types/scene-graph';
-import { isSourceNode, isOperationNode } from '../types/scene-graph';
+import { isSourceNode, isOperationNode, isGroupNode } from '../types/scene-graph';
+import { useLayerStore } from '../stores/layerStore';
 
 // =============================================================================
 // Types
@@ -25,9 +28,11 @@ export interface SceneGraph {
 export interface UpstreamChain {
   /** The source node at the start of the chain (or null if incomplete) */
   sourceNode: SourceNode | null;
+  /** The group node at the start of the chain (or null if incomplete or if source is a SourceNode) */
+  groupNode: GroupNode | null;
   /** Operation nodes in order from source to target */
   operationNodes: OperationNode[];
-  /** Whether the chain is complete (has a source) */
+  /** Whether the chain is complete (has a source or group) */
   isComplete: boolean;
 }
 
@@ -148,8 +153,9 @@ export function findUpstreamChain(
   const operationNodes: OperationNode[] = [];
   let currentNodeId = nodeId;
   let sourceNode: SourceNode | null = null;
+  let groupNode: GroupNode | null = null;
 
-  // Traverse backwards until we hit a source or dead end
+  // Traverse backwards until we hit a source, group, or dead end
   while (true) {
     const currentNode = graph.nodes[currentNodeId];
 
@@ -161,6 +167,12 @@ export function findUpstreamChain(
     if (isSourceNode(currentNode)) {
       // Found the source
       sourceNode = currentNode;
+      break;
+    }
+
+    if (isGroupNode(currentNode)) {
+      // Found a group node
+      groupNode = currentNode;
       break;
     }
 
@@ -183,8 +195,9 @@ export function findUpstreamChain(
 
   return {
     sourceNode,
+    groupNode,
     operationNodes,
-    isComplete: sourceNode !== null,
+    isComplete: sourceNode !== null || groupNode !== null,
   };
 }
 
@@ -271,32 +284,47 @@ export function getEffectChain(
 
 /**
  * Find all asset IDs referenced by source nodes in a graph
+ * @param layers - Optional layers map. If not provided, will access the LayerStore directly.
  */
-export function getReferencedAssetIds(graph: SceneGraph): string[] {
+export function getReferencedAssetIds(
+  graph: SceneGraph,
+  layers?: Record<string, Layer>
+): string[] {
+  const layerMap = layers ?? useLayerStore.getState().layers;
   const sourceNodes = getSourceNodes(graph);
-  return sourceNodes.map((node) => node.layer.assetId);
+  return sourceNodes
+    .map((node) => layerMap[node.layerId]?.assetId)
+    .filter((id): id is string => id !== undefined);
 }
 
 /**
  * Find source nodes referencing a specific asset
+ * @param layers - Optional layers map. If not provided, will access the LayerStore directly.
  */
 export function findSourceNodesForAsset(
   graph: SceneGraph,
-  assetId: string
+  assetId: string,
+  layers?: Record<string, Layer>
 ): SourceNode[] {
+  const layerMap = layers ?? useLayerStore.getState().layers;
   return getSourceNodes(graph).filter(
-    (node) => node.layer.assetId === assetId
+    (node) => layerMap[node.layerId]?.assetId === assetId
   );
 }
 
 /**
  * Check if a graph contains any reference to an asset
+ * @param layers - Optional layers map. If not provided, will access the LayerStore directly.
  */
 export function graphReferencesAsset(
   graph: SceneGraph,
-  assetId: string
+  assetId: string,
+  layers?: Record<string, Layer>
 ): boolean {
-  return getSourceNodes(graph).some((node) => node.layer.assetId === assetId);
+  const layerMap = layers ?? useLayerStore.getState().layers;
+  return getSourceNodes(graph).some(
+    (node) => layerMap[node.layerId]?.assetId === assetId
+  );
 }
 
 // =============================================================================

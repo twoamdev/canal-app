@@ -76,10 +76,21 @@ export function createDefaultTimeRange(frameCount: number): TimeRange {
 // Layer
 // =============================================================================
 
+let layerIdCounter = 0;
+
+/**
+ * Generate a unique layer ID
+ */
+export function generateLayerId(): string {
+  return `layer_${Date.now()}_${++layerIdCounter}`;
+}
+
 /**
  * Layer references an asset and defines how it appears
  */
 export interface Layer {
+  /** Unique identifier for this layer */
+  id: string;
   /** Reference to the Asset in the AssetLibrary */
   assetId: string;
   /** Transform applied to this layer */
@@ -101,11 +112,63 @@ export function createLayer(
   frameCount: number
 ): Layer {
   return {
+    id: generateLayerId(),
     assetId,
     name,
     baseTransform: { ...DEFAULT_TRANSFORM },
     effects: [],
     timeRange: createDefaultTimeRange(frameCount),
+  };
+}
+
+// =============================================================================
+// Group
+// =============================================================================
+
+let groupIdCounter = 0;
+
+/**
+ * Generate a unique group ID
+ */
+export function generateGroupId(): string {
+  return `group_${Date.now()}_${++groupIdCounter}`;
+}
+
+/**
+ * Group combines multiple layers/groups with z-order control.
+ * Similar to Layer but holds memberIds instead of assetId.
+ */
+export interface Group {
+  /** Unique identifier for this group */
+  id: string;
+  /** Ordered list of member IDs (Layer IDs or Group IDs).
+   * Index 0 = background (renders first), last index = foreground (renders last) */
+  memberIds: string[];
+  /** Transform applied to the combined result */
+  baseTransform: Transform;
+  /** IDs of connected OperationNodes (for tracking which effects apply) */
+  effects: string[];
+  /** Time range when this group is active */
+  timeRange: TimeRange;
+  /** Display name for the group */
+  name: string;
+}
+
+/**
+ * Create a new group
+ */
+export function createGroup(
+  name: string,
+  memberIds: string[] = [],
+  durationFrames: number = 1
+): Group {
+  return {
+    id: generateGroupId(),
+    memberIds,
+    name,
+    baseTransform: { ...DEFAULT_TRANSFORM },
+    effects: [],
+    timeRange: createDefaultTimeRange(durationFrames),
   };
 }
 
@@ -176,12 +239,12 @@ interface BaseSceneNode {
 }
 
 /**
- * Source node - contains a layer that references an asset
+ * Source node - references a layer by ID
  */
 export interface SourceNode extends BaseSceneNode {
   type: 'source';
-  /** The layer this source node represents */
-  layer: Layer;
+  /** Reference to the Layer in LayerStore */
+  layerId: string;
 }
 
 /**
@@ -200,9 +263,20 @@ export interface OperationNode extends BaseSceneNode {
 }
 
 /**
+ * Group node - combines multiple sources/groups with z-order control
+ */
+export interface GroupNode extends BaseSceneNode {
+  type: 'group';
+  /** Reference to the Group in GroupStore */
+  groupId: string;
+  /** Display label */
+  label: string;
+}
+
+/**
  * Union type for all scene nodes
  */
-export type SceneNode = SourceNode | OperationNode;
+export type SceneNode = SourceNode | OperationNode | GroupNode;
 
 // =============================================================================
 // Type Guards
@@ -214,6 +288,10 @@ export function isSourceNode(node: SceneNode): node is SourceNode {
 
 export function isOperationNode(node: SceneNode): node is OperationNode {
   return node.type === 'operation';
+}
+
+export function isGroupNode(node: SceneNode): node is GroupNode {
+  return node.type === 'group';
 }
 
 // =============================================================================
@@ -257,18 +335,17 @@ export function generateConnectionId(): string {
 
 /**
  * Create a new SourceNode
+ * Note: Caller must create the Layer first and pass its ID
  */
 export function createSourceNode(
-  assetId: string,
-  assetName: string,
-  frameCount: number,
+  layerId: string,
   position: Position2D = { x: 0, y: 0 }
 ): SourceNode {
   return {
     id: generateNodeId(),
     type: 'source',
     position,
-    layer: createLayer(assetId, assetName, frameCount),
+    layerId,
   };
 }
 
@@ -293,6 +370,23 @@ export function createOperationNode(
     params: { ...DEFAULT_OPERATION_PARAMS[operationType] },
     isEnabled: true,
     label: labels[operationType],
+  };
+}
+
+/**
+ * Create a new GroupNode
+ */
+export function createGroupNode(
+  groupId: string,
+  name: string = 'Group',
+  position: Position2D = { x: 0, y: 0 }
+): GroupNode {
+  return {
+    id: generateNodeId(),
+    type: 'group',
+    position,
+    groupId,
+    label: name,
   };
 }
 

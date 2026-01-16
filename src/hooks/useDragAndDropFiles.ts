@@ -16,6 +16,7 @@ import { useCallback, useState } from 'react';
 import { useReactFlow, type XYPosition } from '@xyflow/react';
 import { useAssetStore } from '../stores/assetStore';
 import { useGraphStore } from '../stores/graphStore';
+import { useLayerStore } from '../stores/layerStore';
 import { useTimelineStore } from '../stores/timelineStore';
 import {
   createAssetFromFile,
@@ -28,7 +29,7 @@ import {
   isImageFile,
   isSVGFile,
 } from '../utils/asset-factory';
-import { createSourceNode, type SourceNode } from '../types/scene-graph';
+import { createSourceNode, createLayer } from '../types/scene-graph';
 import { getAssetFrameCount } from '../types/assets';
 import { detectImageSequences, type DetectedSequence } from '../utils/image-sequence';
 
@@ -43,7 +44,8 @@ export function useDragAndDropFiles() {
   const addAsset = useAssetStore((state) => state.addAsset);
   const updateAsset = useAssetStore((state) => state.updateAsset);
   const addNode = useGraphStore((state) => state.addNode);
-  const updateNode = useGraphStore((state) => state.updateNode);
+  const addLayer = useLayerStore((state) => state.addLayer);
+  const updateLayer = useLayerStore((state) => state.updateLayer);
   const setFrameRange = useTimelineStore((state) => state.setFrameRange);
   const frameEnd = useTimelineStore((state) => state.frameEnd);
 
@@ -102,9 +104,9 @@ export function useDragAndDropFiles() {
       const flowPosition = screenToFlowPosition(position);
 
       // Track all items to process
-      const processingFiles: Array<{ file: File; assetId: string; nodeId: string }> = [];
-      const processingSequences: Array<{ sequence: DetectedSequence; assetId: string; nodeId: string }> = [];
-      const processingSVGs: Array<{ file: File; assetId: string; nodeId: string }> = [];
+      const processingFiles: Array<{ file: File; assetId: string; nodeId: string; layerId: string }> = [];
+      const processingSequences: Array<{ sequence: DetectedSequence; assetId: string; nodeId: string; layerId: string }> = [];
+      const processingSVGs: Array<{ file: File; assetId: string; nodeId: string; layerId: string }> = [];
 
       // Check for folder drops using dataTransfer.items
       const items = event.dataTransfer.items;
@@ -130,25 +132,25 @@ export function useDragAndDropFiles() {
             const placeholderAsset = createPlaceholderSequenceAsset(sequence);
             addAsset(placeholderAsset);
 
+            // Create layer for the asset
+            const layer = createLayer(placeholderAsset.id, placeholderAsset.name, sequence.frameCount);
+            addLayer(layer);
+
             // Calculate position for this node
             const offsetPosition = {
               x: flowPosition.x + nodeIndex * 250,
               y: flowPosition.y + nodeIndex * 50,
             };
 
-            // Create source node
-            const sourceNode = createSourceNode(
-              placeholderAsset.id,
-              placeholderAsset.name,
-              sequence.frameCount,
-              offsetPosition
-            );
+            // Create source node referencing the layer
+            const sourceNode = createSourceNode(layer.id, offsetPosition);
             addNode(sourceNode);
 
             processingSequences.push({
               sequence,
               assetId: placeholderAsset.id,
               nodeId: sourceNode.id,
+              layerId: layer.id,
             });
 
             nodeIndex++;
@@ -170,18 +172,18 @@ export function useDragAndDropFiles() {
               const placeholderAsset = createPlaceholderShapeAsset(file.name.replace(/\.svg$/i, ''));
               addAsset(placeholderAsset);
 
-              const sourceNode = createSourceNode(
-                placeholderAsset.id,
-                placeholderAsset.name,
-                1, // Shapes are single frame
-                offsetPosition
-              );
+              // Create layer for the asset
+              const layer = createLayer(placeholderAsset.id, placeholderAsset.name, 1);
+              addLayer(layer);
+
+              const sourceNode = createSourceNode(layer.id, offsetPosition);
               addNode(sourceNode);
 
               processingSVGs.push({
                 file,
                 assetId: placeholderAsset.id,
                 nodeId: sourceNode.id,
+                layerId: layer.id,
               });
 
               nodeIndex++;
@@ -191,18 +193,17 @@ export function useDragAndDropFiles() {
               addAsset(placeholderAsset);
 
               const defaultFrameCount = isVideoFile(file) ? 300 : 1;
-              const sourceNode = createSourceNode(
-                placeholderAsset.id,
-                placeholderAsset.name,
-                defaultFrameCount,
-                offsetPosition
-              );
+              const layer = createLayer(placeholderAsset.id, placeholderAsset.name, defaultFrameCount);
+              addLayer(layer);
+
+              const sourceNode = createSourceNode(layer.id, offsetPosition);
               addNode(sourceNode);
 
               processingFiles.push({
                 file,
                 assetId: placeholderAsset.id,
                 nodeId: sourceNode.id,
+                layerId: layer.id,
               });
 
               nodeIndex++;
@@ -226,18 +227,17 @@ export function useDragAndDropFiles() {
             const placeholderAsset = createPlaceholderShapeAsset(file.name.replace(/\.svg$/i, ''));
             addAsset(placeholderAsset);
 
-            const sourceNode = createSourceNode(
-              placeholderAsset.id,
-              placeholderAsset.name,
-              1,
-              offsetPosition
-            );
+            const layer = createLayer(placeholderAsset.id, placeholderAsset.name, 1);
+            addLayer(layer);
+
+            const sourceNode = createSourceNode(layer.id, offsetPosition);
             addNode(sourceNode);
 
             processingSVGs.push({
               file,
               assetId: placeholderAsset.id,
               nodeId: sourceNode.id,
+              layerId: layer.id,
             });
 
             nodeIndex++;
@@ -246,18 +246,17 @@ export function useDragAndDropFiles() {
             addAsset(placeholderAsset);
 
             const defaultFrameCount = isVideoFile(file) ? 300 : 1;
-            const sourceNode = createSourceNode(
-              placeholderAsset.id,
-              placeholderAsset.name,
-              defaultFrameCount,
-              offsetPosition
-            );
+            const layer = createLayer(placeholderAsset.id, placeholderAsset.name, defaultFrameCount);
+            addLayer(layer);
+
+            const sourceNode = createSourceNode(layer.id, offsetPosition);
             addNode(sourceNode);
 
             processingFiles.push({
               file,
               assetId: placeholderAsset.id,
               nodeId: sourceNode.id,
+              layerId: layer.id,
             });
 
             nodeIndex++;
@@ -283,7 +282,7 @@ export function useDragAndDropFiles() {
       let maxFrameCount = frameEnd;
 
       // Process regular files
-      for (const { file, assetId, nodeId } of processingFiles) {
+      for (const { file, assetId, layerId } of processingFiles) {
         try {
           updateAsset(assetId, {
             loadingState: { isLoading: true, progress: 0 },
@@ -307,19 +306,13 @@ export function useDragAndDropFiles() {
 
           const actualFrameCount = getAssetFrameCount(processedAsset);
 
-          updateNode(nodeId, (node) => {
-            if (node.type !== 'source') return node;
-            return {
-              ...node,
-              layer: {
-                ...node.layer,
-                timeRange: {
-                  inFrame: 0,
-                  outFrame: actualFrameCount,
-                  sourceOffset: 0,
-                },
-              },
-            } as SourceNode;
+          // Update layer's timeRange in LayerStore
+          updateLayer(layerId, {
+            timeRange: {
+              inFrame: 0,
+              outFrame: actualFrameCount,
+              sourceOffset: 0,
+            },
           });
 
           if (actualFrameCount > maxFrameCount) {
@@ -351,7 +344,7 @@ export function useDragAndDropFiles() {
       }
 
       // Process image sequences
-      for (const { sequence, assetId, nodeId } of processingSequences) {
+      for (const { sequence, assetId, layerId } of processingSequences) {
         try {
           updateAsset(assetId, {
             loadingState: { isLoading: true, progress: 0 },
@@ -376,19 +369,13 @@ export function useDragAndDropFiles() {
 
           const actualFrameCount = getAssetFrameCount(processedAsset);
 
-          updateNode(nodeId, (node) => {
-            if (node.type !== 'source') return node;
-            return {
-              ...node,
-              layer: {
-                ...node.layer,
-                timeRange: {
-                  inFrame: 0,
-                  outFrame: actualFrameCount,
-                  sourceOffset: 0,
-                },
-              },
-            } as SourceNode;
+          // Update layer's timeRange in LayerStore
+          updateLayer(layerId, {
+            timeRange: {
+              inFrame: 0,
+              outFrame: actualFrameCount,
+              sourceOffset: 0,
+            },
           });
 
           if (actualFrameCount > maxFrameCount) {
@@ -420,7 +407,7 @@ export function useDragAndDropFiles() {
       }
 
       // Process SVG files
-      for (const { file, assetId, nodeId } of processingSVGs) {
+      for (const { file, assetId, layerId } of processingSVGs) {
         try {
           updateAsset(assetId, {
             loadingState: { isLoading: true, progress: 0.5 },
@@ -435,20 +422,13 @@ export function useDragAndDropFiles() {
             loadingState: undefined,
           });
 
-          // Shapes are single frame but can be extended
-          updateNode(nodeId, (node) => {
-            if (node.type !== 'source') return node;
-            return {
-              ...node,
-              layer: {
-                ...node.layer,
-                timeRange: {
-                  inFrame: 0,
-                  outFrame: 1,
-                  sourceOffset: 0,
-                },
-              },
-            } as SourceNode;
+          // Update layer's timeRange in LayerStore (shapes are single frame)
+          updateLayer(layerId, {
+            timeRange: {
+              inFrame: 0,
+              outFrame: 1,
+              sourceOffset: 0,
+            },
           });
 
           completed++;
@@ -487,7 +467,7 @@ export function useDragAndDropFiles() {
         error: null,
       });
     },
-    [screenToFlowPosition, addAsset, updateAsset, addNode, updateNode, setFrameRange, frameEnd]
+    [screenToFlowPosition, addAsset, updateAsset, addNode, addLayer, updateLayer, setFrameRange, frameEnd]
   );
 
   const handleFileDragOver = useCallback((event: React.DragEvent) => {

@@ -12,6 +12,7 @@ import { usePanelStore } from '../../stores/panelStore';
 import { useGraphStore } from '../../stores/graphStore';
 import { useAssetStore } from '../../stores/assetStore';
 import { useCompositionStore } from '../../stores/compositionStore';
+import { useLayerStore } from '../../stores/layerStore';
 import { isSourceNode, isOperationNode } from '../../types/scene-graph';
 import type { SourceNode, OperationNode, BlurParams, ColorCorrectParams } from '../../types/scene-graph';
 import { isVideoAsset, getAssetDimensions } from '../../types/assets';
@@ -31,9 +32,19 @@ interface SourceNodeEditorProps {
 
 function SourceNodeEditor({ node }: SourceNodeEditorProps) {
   const assets = useAssetStore((s) => s.assets);
-  const updateNode = useGraphStore((s) => s.updateNode);
+  const layer = useLayerStore((s) => s.layers[node.layerId]);
+  const updateLayer = useLayerStore((s) => s.updateLayer);
 
-  const asset = assets[node.layer.assetId];
+  // Early return if layer not found
+  if (!layer) {
+    return (
+      <div className="py-4 text-center text-muted-foreground/60">
+        Layer not found
+      </div>
+    );
+  }
+
+  const asset = assets[layer.assetId];
   const dimensions = asset ? getAssetDimensions(asset) : { width: 0, height: 0 };
 
   // Get icon based on asset type
@@ -53,62 +64,47 @@ function SourceNodeEditor({ node }: SourceNodeEditorProps) {
   // Update time range
   const updateTimeRange = useCallback(
     (field: 'inFrame' | 'outFrame' | 'sourceOffset', value: number) => {
-      updateNode(node.id, (n) => {
-        if (n.type !== 'source') return {};
-        return {
-          layer: {
-            ...n.layer,
-            timeRange: {
-              ...n.layer.timeRange,
-              [field]: value,
-            },
-          },
-        };
+      updateLayer(layer.id, {
+        timeRange: {
+          ...layer.timeRange,
+          [field]: value,
+        },
       });
     },
-    [node.id, updateNode]
+    [layer.id, layer.timeRange, updateLayer]
   );
 
   // Update transform
   const updateTransform = useCallback(
     (field: string, value: number) => {
-      updateNode(node.id, (n) => {
-        if (n.type !== 'source') return {};
-
-        // Handle nested properties like position.x, scale.y
-        const parts = field.split('.');
-        if (parts.length === 2) {
-          const [group, prop] = parts;
-          const currentGroup = n.layer.baseTransform[group as 'position' | 'scale' | 'anchorPoint'];
-          if (typeof currentGroup === 'object') {
-            return {
-              layer: {
-                ...n.layer,
-                baseTransform: {
-                  ...n.layer.baseTransform,
-                  [group]: {
-                    ...currentGroup,
-                    [prop]: value,
-                  },
-                },
-              },
-            };
-          }
-        }
-
-        // Handle simple properties like rotation, opacity
-        return {
-          layer: {
-            ...n.layer,
+      // Handle nested properties like position.x, scale.y
+      const parts = field.split('.');
+      if (parts.length === 2) {
+        const [group, prop] = parts;
+        const currentGroup = layer.baseTransform[group as 'position' | 'scale' | 'anchorPoint'];
+        if (typeof currentGroup === 'object') {
+          updateLayer(layer.id, {
             baseTransform: {
-              ...n.layer.baseTransform,
-              [field]: value,
+              ...layer.baseTransform,
+              [group]: {
+                ...currentGroup,
+                [prop]: value,
+              },
             },
-          },
-        };
+          });
+          return;
+        }
+      }
+
+      // Handle simple properties like rotation, opacity
+      updateLayer(layer.id, {
+        baseTransform: {
+          ...layer.baseTransform,
+          [field]: value,
+        },
       });
     },
-    [node.id, updateNode]
+    [layer.id, layer.baseTransform, updateLayer]
   );
 
   return (
@@ -119,7 +115,7 @@ function SourceNodeEditor({ node }: SourceNodeEditorProps) {
           <IconComponent className="w-5 h-5 text-primary" />
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-sm truncate">{node.layer.name || 'Source'}</h3>
+          <h3 className="font-semibold text-sm truncate">{layer.name || 'Source'}</h3>
           <p className="text-xs text-muted-foreground capitalize">{asset?.type ?? 'Unknown'}</p>
         </div>
       </div>
@@ -164,12 +160,12 @@ function SourceNodeEditor({ node }: SourceNodeEditorProps) {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label className="text-xs">In Frame</Label>
-            <span className="text-xs tabular-nums text-muted-foreground">{node.layer.timeRange.inFrame}</span>
+            <span className="text-xs tabular-nums text-muted-foreground">{layer.timeRange.inFrame}</span>
           </div>
           <Slider
-            value={[node.layer.timeRange.inFrame]}
+            value={[layer.timeRange.inFrame]}
             min={0}
-            max={Math.max(node.layer.timeRange.outFrame - 1, 0)}
+            max={Math.max(layer.timeRange.outFrame - 1, 0)}
             step={1}
             onValueChange={(v) => updateTimeRange('inFrame', v[0])}
           />
@@ -178,11 +174,11 @@ function SourceNodeEditor({ node }: SourceNodeEditorProps) {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label className="text-xs">Out Frame</Label>
-            <span className="text-xs tabular-nums text-muted-foreground">{node.layer.timeRange.outFrame}</span>
+            <span className="text-xs tabular-nums text-muted-foreground">{layer.timeRange.outFrame}</span>
           </div>
           <Slider
-            value={[node.layer.timeRange.outFrame]}
-            min={node.layer.timeRange.inFrame + 1}
+            value={[layer.timeRange.outFrame]}
+            min={layer.timeRange.inFrame + 1}
             max={asset && isVideoAsset(asset) ? asset.metadata.frameCount : 1000}
             step={1}
             onValueChange={(v) => updateTimeRange('outFrame', v[0])}
@@ -192,10 +188,10 @@ function SourceNodeEditor({ node }: SourceNodeEditorProps) {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label className="text-xs">Source Offset</Label>
-            <span className="text-xs tabular-nums text-muted-foreground">{node.layer.timeRange.sourceOffset}</span>
+            <span className="text-xs tabular-nums text-muted-foreground">{layer.timeRange.sourceOffset}</span>
           </div>
           <Slider
-            value={[node.layer.timeRange.sourceOffset]}
+            value={[layer.timeRange.sourceOffset]}
             min={0}
             max={asset && isVideoAsset(asset) ? asset.metadata.frameCount - 1 : 0}
             step={1}
@@ -212,10 +208,10 @@ function SourceNodeEditor({ node }: SourceNodeEditorProps) {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-xs">Position X</Label>
-              <span className="text-xs tabular-nums text-muted-foreground">{node.layer.baseTransform.position.x}</span>
+              <span className="text-xs tabular-nums text-muted-foreground">{layer.baseTransform.position.x}</span>
             </div>
             <Slider
-              value={[node.layer.baseTransform.position.x]}
+              value={[layer.baseTransform.position.x]}
               min={-1000}
               max={1000}
               step={1}
@@ -225,10 +221,10 @@ function SourceNodeEditor({ node }: SourceNodeEditorProps) {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-xs">Position Y</Label>
-              <span className="text-xs tabular-nums text-muted-foreground">{node.layer.baseTransform.position.y}</span>
+              <span className="text-xs tabular-nums text-muted-foreground">{layer.baseTransform.position.y}</span>
             </div>
             <Slider
-              value={[node.layer.baseTransform.position.y]}
+              value={[layer.baseTransform.position.y]}
               min={-1000}
               max={1000}
               step={1}
@@ -241,10 +237,10 @@ function SourceNodeEditor({ node }: SourceNodeEditorProps) {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-xs">Scale X</Label>
-              <span className="text-xs tabular-nums text-muted-foreground">{node.layer.baseTransform.scale.x.toFixed(2)}</span>
+              <span className="text-xs tabular-nums text-muted-foreground">{layer.baseTransform.scale.x.toFixed(2)}</span>
             </div>
             <Slider
-              value={[node.layer.baseTransform.scale.x]}
+              value={[layer.baseTransform.scale.x]}
               min={0}
               max={4}
               step={0.01}
@@ -254,10 +250,10 @@ function SourceNodeEditor({ node }: SourceNodeEditorProps) {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-xs">Scale Y</Label>
-              <span className="text-xs tabular-nums text-muted-foreground">{node.layer.baseTransform.scale.y.toFixed(2)}</span>
+              <span className="text-xs tabular-nums text-muted-foreground">{layer.baseTransform.scale.y.toFixed(2)}</span>
             </div>
             <Slider
-              value={[node.layer.baseTransform.scale.y]}
+              value={[layer.baseTransform.scale.y]}
               min={0}
               max={4}
               step={0.01}
@@ -269,10 +265,10 @@ function SourceNodeEditor({ node }: SourceNodeEditorProps) {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label className="text-xs">Rotation</Label>
-            <span className="text-xs tabular-nums text-muted-foreground">{node.layer.baseTransform.rotation.toFixed(1)}°</span>
+            <span className="text-xs tabular-nums text-muted-foreground">{layer.baseTransform.rotation.toFixed(1)}°</span>
           </div>
           <Slider
-            value={[node.layer.baseTransform.rotation]}
+            value={[layer.baseTransform.rotation]}
             min={-180}
             max={180}
             step={0.5}
@@ -283,10 +279,10 @@ function SourceNodeEditor({ node }: SourceNodeEditorProps) {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label className="text-xs">Opacity</Label>
-            <span className="text-xs tabular-nums text-muted-foreground">{(node.layer.baseTransform.opacity * 100).toFixed(0)}%</span>
+            <span className="text-xs tabular-nums text-muted-foreground">{(layer.baseTransform.opacity * 100).toFixed(0)}%</span>
           </div>
           <Slider
-            value={[node.layer.baseTransform.opacity]}
+            value={[layer.baseTransform.opacity]}
             min={0}
             max={1}
             step={0.01}

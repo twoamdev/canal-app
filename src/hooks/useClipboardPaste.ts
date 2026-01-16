@@ -11,19 +11,21 @@ import { useEffect, useCallback } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { useAssetStore } from '../stores/assetStore';
 import { useGraphStore } from '../stores/graphStore';
+import { useLayerStore } from '../stores/layerStore';
 import {
   createShapeAssetFromSVGString,
   createPlaceholderImageAsset,
   createImageAsset,
 } from '../utils/asset-factory';
 import { extractSVGFromString } from '../utils/svg-parser';
-import { createSourceNode } from '../types/scene-graph';
+import { createSourceNode, createLayer } from '../types/scene-graph';
 
 export function useClipboardPaste() {
   const { getViewport } = useReactFlow();
   const addAsset = useAssetStore((state) => state.addAsset);
   const updateAsset = useAssetStore((state) => state.updateAsset);
   const addNode = useGraphStore((state) => state.addNode);
+  const addLayer = useLayerStore((state) => state.addLayer);
 
   const handlePaste = useCallback(
     async (event: ClipboardEvent) => {
@@ -46,16 +48,18 @@ export function useClipboardPaste() {
         const shapeAsset = createShapeAssetFromSVGString(svgString, name);
         addAsset(shapeAsset);
 
+        // Create layer for the asset
+        const layer = createLayer(shapeAsset.id, shapeAsset.name, 1);
+        addLayer(layer);
+
         // Calculate position at center of viewport
         const viewport = getViewport();
         const centerX = (-viewport.x + window.innerWidth / 2) / viewport.zoom;
         const centerY = (-viewport.y + window.innerHeight / 2) / viewport.zoom;
 
-        // Create source node
+        // Create source node referencing the layer
         const sourceNode = createSourceNode(
-          shapeAsset.id,
-          shapeAsset.name,
-          1, // Shapes are single frame
+          layer.id,
           { x: centerX - 100, y: centerY - 100 }
         );
         addNode(sourceNode);
@@ -127,14 +131,16 @@ export function useClipboardPaste() {
               const placeholderAsset = createPlaceholderImageAsset(file);
               addAsset(placeholderAsset);
 
+              // Create layer for the asset
+              const layer = createLayer(placeholderAsset.id, placeholderAsset.name, 1);
+              addLayer(layer);
+
               const viewport = getViewport();
               const centerX = (-viewport.x + window.innerWidth / 2) / viewport.zoom;
               const centerY = (-viewport.y + window.innerHeight / 2) / viewport.zoom;
 
               const sourceNode = createSourceNode(
-                placeholderAsset.id,
-                placeholderAsset.name,
-                1,
+                layer.id,
                 { x: centerX - 100, y: centerY - 100 }
               );
               addNode(sourceNode);
@@ -160,7 +166,7 @@ export function useClipboardPaste() {
       }
 
     },
-    [addAsset, updateAsset, addNode, getViewport]
+    [addAsset, updateAsset, addNode, addLayer, getViewport]
   );
 
   useEffect(() => {

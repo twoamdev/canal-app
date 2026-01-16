@@ -17,7 +17,7 @@ import { initializeCompositionSystem } from '../../stores/compositionStore';
 import { useCommandMenuStore } from '../../stores/commandMenuStore';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { NodeCommandMenu } from './NodeCommandMenu';
-import { SourceNodeComponent, OperationNodeComponent, BaseNode } from '../nodes';
+import { SourceNodeComponent, OperationNodeComponent, GroupNodeComponent, BaseNode } from '../nodes';
 import { ZoomInvariantEdge, ZoomInvariantConnectionLine, ClickConnectionLine } from '../edges';
 
 // Component to initialize hotkeys inside ReactFlow context
@@ -36,6 +36,7 @@ function ClipboardHandler() {
 const nodeTypes = {
     source: SourceNodeComponent,
     operation: OperationNodeComponent,
+    group: GroupNodeComponent,
     // Legacy fallback
     default: BaseNode,
 };

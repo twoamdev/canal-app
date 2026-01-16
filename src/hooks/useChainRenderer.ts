@@ -10,6 +10,7 @@ import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import { useAssetStore } from '../stores/assetStore';
 import { useCompositionStore } from '../stores/compositionStore';
 import { useTimelineStore } from '../stores/timelineStore';
+import { useLayerStore } from '../stores/layerStore';
 import { loadAssetFrame, mapGlobalFrameToSource, globalFrameCache } from '../utils/asset-loader';
 import { findUpstreamChain, type SceneGraph } from '../utils/scene-graph-utils';
 import { isRenderableAsset } from '../types/assets';
@@ -69,6 +70,7 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
 
   // Stores
   const assets = useAssetStore((s) => s.assets);
+  const layers = useLayerStore((s) => s.layers);
 
   // Optimized frame subscription:
   // - Selected nodes subscribe to currentFrame for real-time updates
@@ -148,15 +150,56 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
     // Find upstream chain
     const chain = findUpstreamChain(sceneGraph, nodeId);
 
-    if (!chain.isComplete || !chain.sourceNode) {
+    if (!chain.isComplete || (!chain.sourceNode && !chain.groupNode)) {
       setState((s) => ({ ...s, isLoading: false, error: null, hasUpstream: false }));
       return;
     }
 
     setState((s) => ({ ...s, hasUpstream: true }));
 
+    // If the chain has a GroupNode, we need to render the group
+    // For now, show a placeholder - full group compositing will be implemented later
+    if (chain.groupNode) {
+      // TODO: Implement group compositing
+      // For now, just show the first member if available
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      canvas.width = DEFAULT_VIEWER_WIDTH;
+      canvas.height = DEFAULT_VIEWER_HEIGHT;
+      drawCheckerboard(ctx, canvas.width, canvas.height);
+
+      // Draw placeholder text for group
+      ctx.fillStyle = 'rgba(147, 51, 234, 0.3)'; // purple-500
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.font = '14px system-ui';
+      ctx.fillStyle = 'white';
+      ctx.textAlign = 'center';
+      ctx.fillText('Group Compositing', canvas.width / 2, canvas.height / 2 - 10);
+      ctx.fillText('(Coming Soon)', canvas.width / 2, canvas.height / 2 + 10);
+
+      setState((s) => ({
+        ...s,
+        isLoading: false,
+        error: null,
+        hasUpstream: true,
+        dimensions: { width: DEFAULT_VIEWER_WIDTH, height: DEFAULT_VIEWER_HEIGHT },
+      }));
+      return;
+    }
+
+    // Get the source layer
+    const sourceLayer = layers[chain.sourceNode!.layerId];
+    if (!sourceLayer) {
+      setState((s) => ({ ...s, isLoading: false, error: 'Source layer not found', hasUpstream: true }));
+      return;
+    }
+
     // Get the source asset
-    const sourceAsset = assets[chain.sourceNode.layer.assetId];
+    const sourceAsset = assets[sourceLayer.assetId];
     if (!sourceAsset) {
       setState((s) => ({ ...s, isLoading: false, error: 'Source asset not found', hasUpstream: true }));
       return;
@@ -180,7 +223,7 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
     // Map global frame to source frame
     const sourceFrame = mapGlobalFrameToSource(
       currentFrame,
-      chain.sourceNode.layer.timeRange,
+      sourceLayer.timeRange,
       sourceAsset
     );
 
@@ -317,7 +360,7 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
       console.error('Failed to render chain:', err);
       setState((s) => ({ ...s, isLoading: false, error: 'Render failed', hasUpstream: true }));
     }
-  }, [graph, nodeId, assets, currentFrame, canvasRef]);
+  }, [graph, nodeId, assets, layers, currentFrame, canvasRef]);
 
   // Run render when dependencies change
   useEffect(() => {

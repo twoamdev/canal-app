@@ -15,6 +15,7 @@ import { Handle, Position, useViewport, useUpdateNodeInternals, useReactFlow } f
 import type { SourceNode } from '../../types/scene-graph';
 import { useAssetStore } from '../../stores/assetStore';
 import { useGraphStore } from '../../stores/graphStore';
+import { useLayerStore } from '../../stores/layerStore';
 import { useTimelineStore } from '../../stores/timelineStore';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { loadAssetFrame, mapGlobalFrameToSource, globalFrameCache } from '../../utils/asset-loader';
@@ -85,10 +86,24 @@ interface SourceNodeComponentProps {
 
 export function SourceNodeComponent(props: SourceNodeComponentProps) {
   const { id, data, selected } = props;
-  const { layer } = data;
+
+  // Fetch layer from LayerStore
+  const layer = useLayerStore((s) => s.layers[data.layerId]);
 
   // Refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Early return if layer not found
+  if (!layer) {
+    return (
+      <Card className="min-w-[200px] p-4 ring-2 ring-destructive/50">
+        <div className="text-center text-muted-foreground py-4">
+          <p className="text-sm">Layer not found</p>
+          <p className="text-xs opacity-60">{data.layerId}</p>
+        </div>
+      </Card>
+    );
+  }
   const lastRenderedFrameRef = useRef<number | null>(null);
   const canvasDimensionsRef = useRef<{ width: number; height: number } | null>(null);
   const isInitialLoadRef = useRef(true);

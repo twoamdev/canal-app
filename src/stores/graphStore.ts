@@ -11,10 +11,13 @@ import type { SceneNode, SourceNode, OperationNode, Connection } from '../types/
 import {
   isSourceNode,
   isOperationNode,
+  isGroupNode,
   generateConnectionId,
 } from '../types/scene-graph';
 import { useAssetStore } from './assetStore';
 import { useCompositionStore } from './compositionStore';
+import { useLayerStore } from './layerStore';
+import { useGroupStore } from './groupStore';
 
 // =============================================================================
 // Types
@@ -108,28 +111,35 @@ function getActiveGraph(): { nodes: Record<string, SceneNode>; edges: Connection
  */
 async function cleanupSourceNodeAsset(node: SourceNode): Promise<void> {
   const assetStore = useAssetStore.getState();
-  const asset = assetStore.getAsset(node.layer.assetId);
+  const layerStore = useLayerStore.getState();
 
+  // Get the layer for this node
+  const layer = layerStore.getLayer(node.layerId);
+  if (!layer) return;
+
+  const asset = assetStore.getAsset(layer.assetId);
   if (!asset) return;
 
-  // Check if any other source nodes reference this asset
+  // Check if any other source nodes reference this asset via their layers
   const compositionId = getActiveCompositionId();
   if (!compositionId) return;
 
   const graph = getActiveGraph();
   if (!graph) return;
 
-  const otherReferences = Object.values(graph.nodes).filter(
-    (n) =>
-      n.id !== node.id &&
-      isSourceNode(n) &&
-      n.layer.assetId === node.layer.assetId
-  );
+  const otherReferences = Object.values(graph.nodes).filter((n) => {
+    if (n.id === node.id || !isSourceNode(n)) return false;
+    const otherLayer = layerStore.getLayer(n.layerId);
+    return otherLayer?.assetId === layer.assetId;
+  });
 
   // Only delete asset if no other references
   if (otherReferences.length === 0) {
-    await assetStore.removeAsset(node.layer.assetId);
+    await assetStore.removeAsset(layer.assetId);
   }
+
+  // Also remove the layer
+  layerStore.removeLayer(node.layerId);
 }
 
 /**
@@ -257,21 +267,32 @@ export const useGraphStore = create<GraphState>()(() => ({
 
     useAssetStore.getState().addEdgeToComposition(compositionId, connection);
 
-    // Update the source node's layer.effects array if connecting to an operation
+    // Update stores based on connection type
     const graph = getActiveGraph();
     if (graph) {
       const sourceNode = graph.nodes[edge.source];
       const targetNode = graph.nodes[edge.target];
 
+      // Source -> Operation: track effects on the layer
       if (isSourceNode(sourceNode) && isOperationNode(targetNode)) {
-        // Add the operation to the source's effects tracking
-        const newEffects = [...sourceNode.layer.effects, targetNode.id];
-        useAssetStore.getState().updateNodeInComposition(compositionId, edge.source, {
-          layer: {
-            ...sourceNode.layer,
-            effects: newEffects,
-          },
-        } as Partial<SourceNode>);
+        const layerStore = useLayerStore.getState();
+        const layer = layerStore.getLayer(sourceNode.layerId);
+        if (layer) {
+          const newEffects = [...layer.effects, targetNode.id];
+          layerStore.updateLayer(sourceNode.layerId, { effects: newEffects });
+        }
+      }
+
+      // Source -> Group: add layer to group's memberIds
+      if (isSourceNode(sourceNode) && isGroupNode(targetNode)) {
+        const groupStore = useGroupStore.getState();
+        groupStore.addMember(targetNode.groupId, sourceNode.layerId);
+      }
+
+      // Group -> Group: add group to group's memberIds
+      if (isGroupNode(sourceNode) && isGroupNode(targetNode)) {
+        const groupStore = useGroupStore.getState();
+        groupStore.addMember(targetNode.groupId, sourceNode.groupId);
       }
     }
   },
@@ -280,7 +301,7 @@ export const useGraphStore = create<GraphState>()(() => ({
     const compositionId = getActiveCompositionId();
     if (!compositionId) return;
 
-    // Find the edge before removing to update layer.effects
+    // Find the edge before removing to update stores
     const graph = getActiveGraph();
     if (graph) {
       const edge = graph.edges.find((e) => e.id === id);
@@ -288,17 +309,28 @@ export const useGraphStore = create<GraphState>()(() => ({
         const sourceNode = graph.nodes[edge.source];
         const targetNode = graph.nodes[edge.target];
 
+        // Source -> Operation: remove from layer's effects
         if (isSourceNode(sourceNode) && isOperationNode(targetNode)) {
-          // Remove the operation from the source's effects tracking
-          const newEffects = sourceNode.layer.effects.filter(
-            (effectId) => effectId !== targetNode.id
-          );
-          useAssetStore.getState().updateNodeInComposition(compositionId, edge.source, {
-            layer: {
-              ...sourceNode.layer,
-              effects: newEffects,
-            },
-          } as Partial<SourceNode>);
+          const layerStore = useLayerStore.getState();
+          const layer = layerStore.getLayer(sourceNode.layerId);
+          if (layer) {
+            const newEffects = layer.effects.filter(
+              (effectId) => effectId !== targetNode.id
+            );
+            layerStore.updateLayer(sourceNode.layerId, { effects: newEffects });
+          }
+        }
+
+        // Source -> Group: remove layer from group's memberIds
+        if (isSourceNode(sourceNode) && isGroupNode(targetNode)) {
+          const groupStore = useGroupStore.getState();
+          groupStore.removeMember(targetNode.groupId, sourceNode.layerId);
+        }
+
+        // Group -> Group: remove group from group's memberIds
+        if (isGroupNode(sourceNode) && isGroupNode(targetNode)) {
+          const groupStore = useGroupStore.getState();
+          groupStore.removeMember(targetNode.groupId, sourceNode.groupId);
         }
       }
     }
