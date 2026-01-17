@@ -119,6 +119,8 @@ export interface ShapeAssetMetadata {
   strokeDashoffset?: number;
   /** Original SVG source (for reference) */
   originalSVG?: string;
+  /** Original position within the parent SVG (for split paths) */
+  originalPosition?: { x: number; y: number };
   /** Multiple paths with individual styles (for complex SVGs) */
   paths?: Array<{
     pathData: string;

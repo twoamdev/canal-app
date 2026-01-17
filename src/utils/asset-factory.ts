@@ -662,6 +662,110 @@ export async function createShapeAssetFromSVGFile(file: File): Promise<ShapeAsse
 }
 
 /**
+ * Result of splitting an SVG into individual path assets
+ */
+export interface SplitSVGResult {
+  /** Individual shape assets, one per path (in SVG order - first = bottom layer) */
+  assets: ShapeAsset[];
+  /** Combined bounds of the entire SVG */
+  bounds: { width: number; height: number };
+  /** Original SVG string if available */
+  originalSVG?: string;
+}
+
+/**
+ * Create individual ShapeAssets for each path in an SVG
+ * Each asset maintains its position relative to the SVG origin
+ */
+export function createSplitShapeAssetsFromParsedSVG(
+  baseName: string,
+  parsed: ParsedSVG,
+  originalSVG?: string
+): SplitSVGResult {
+  const now = Date.now();
+
+  // Normalize bounds to start at origin
+  const { normalizedBounds, offset } = normalizeBounds(parsed.bounds);
+
+  const assets: ShapeAsset[] = parsed.paths.map((path, index) => {
+    // Translate this path's data by the SVG offset
+    const translatedPathData = translatePathData(path.pathData, offset.x, offset.y);
+
+    // Calculate this path's bounds relative to the normalized SVG origin
+    const pathBounds = {
+      x: path.bounds.x + offset.x,
+      y: path.bounds.y + offset.y,
+      width: path.bounds.width,
+      height: path.bounds.height,
+    };
+
+    // Name each path with an index
+    const pathName = parsed.paths.length > 1
+      ? `${baseName} - Path ${index + 1}`
+      : baseName;
+
+    return {
+      id: generateAssetId('shape'),
+      type: 'shape' as const,
+      name: pathName,
+      // Use the path's own bounds for dimensions
+      intrinsicWidth: Math.max(1, Math.ceil(pathBounds.width)),
+      intrinsicHeight: Math.max(1, Math.ceil(pathBounds.height)),
+      createdAt: now,
+      updatedAt: now,
+      metadata: {
+        pathData: translatedPathData,
+        fillColor: path.style.fill ?? '#000000',
+        fillOpacity: path.style.fillOpacity,
+        fillRule: path.style.fillRule,
+        strokeColor: path.style.stroke,
+        strokeWidth: path.style.strokeWidth,
+        strokeOpacity: path.style.strokeOpacity,
+        strokeLinecap: path.style.strokeLinecap,
+        strokeLinejoin: path.style.strokeLinejoin,
+        strokeMiterlimit: path.style.strokeMiterlimit,
+        strokeDasharray: path.style.strokeDasharray,
+        strokeDashoffset: path.style.strokeDashoffset,
+        // Store position info so we can properly position the layer
+        originalPosition: { x: pathBounds.x, y: pathBounds.y },
+      },
+    };
+  });
+
+  return {
+    assets,
+    bounds: {
+      width: Math.max(1, Math.ceil(normalizedBounds.width)),
+      height: Math.max(1, Math.ceil(normalizedBounds.height)),
+    },
+    originalSVG,
+  };
+}
+
+/**
+ * Create individual ShapeAssets from an SVG string
+ */
+export function createSplitShapeAssetsFromSVGString(
+  svgString: string,
+  name: string = 'Pasted Shape'
+): SplitSVGResult {
+  const parsed = parseSVGString(svgString);
+  return createSplitShapeAssetsFromParsedSVG(name, parsed, svgString);
+}
+
+/**
+ * Create individual ShapeAssets from an SVG file
+ */
+export async function createSplitShapeAssetsFromSVGFile(
+  file: File
+): Promise<SplitSVGResult> {
+  const svgText = await file.text();
+  const parsed = parseSVGString(svgText);
+  const name = file.name.replace(/\.svg$/i, '');
+  return createSplitShapeAssetsFromParsedSVG(name, parsed, svgText);
+}
+
+/**
  * Create a ShapeAsset from an SVG string
  */
 export function createShapeAssetFromSVGString(

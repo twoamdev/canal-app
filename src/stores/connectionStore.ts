@@ -13,6 +13,8 @@ export interface ConnectionSource {
   nodeId: string;
   handleType: 'source' | 'target';
   handlePosition: Position;
+  /** ID of the handle (for nodes with multiple handles) */
+  handleId?: string;
   // Screen coordinates of the handle
   x: number;
   y: number;

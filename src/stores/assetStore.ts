@@ -15,7 +15,7 @@ import {
 } from '../types/assets';
 import type { SceneNode, Connection } from '../types/scene-graph';
 import { opfsManager } from '../utils/opfs';
-import { deleteVideoFrames } from '../utils/frame-storage';
+import { deleteVideoFrames, getFramesFolderPath } from '../utils/frame-storage';
 
 // =============================================================================
 // Types
@@ -78,24 +78,57 @@ interface AssetState {
  */
 async function cleanupAssetFiles(asset: Asset): Promise<void> {
   if (isVideoAsset(asset)) {
-    const { fileHandleId, frameCount, extractedFrameFormat } = asset.metadata;
+    const { fileHandleId, frameCount, extractedFrameFormat, isImageSequence, sequenceFramePaths } = asset.metadata;
 
-    // Delete extracted frames if they exist
-    if (extractedFrameFormat && frameCount > 0) {
-      try {
-        await deleteVideoFrames(fileHandleId, frameCount, extractedFrameFormat);
-        console.log(`Deleted ${frameCount} extracted frames for: ${fileHandleId}`);
-      } catch (error) {
-        console.error(`Failed to delete extracted frames for ${fileHandleId}:`, error);
+    if (isImageSequence) {
+      // Image sequence: delete frames using sequenceFramePaths and then delete the directory
+      if (sequenceFramePaths) {
+        const framePaths = Object.values(sequenceFramePaths);
+        const deletePromises = framePaths.map((framePath) =>
+          opfsManager.deleteFile(framePath).catch((err) => {
+            // Ignore errors for individual frames
+            console.warn(`Failed to delete sequence frame ${framePath}:`, err);
+          })
+        );
+        await Promise.all(deletePromises);
+        console.log(`Deleted ${framePaths.length} sequence frames for: ${fileHandleId}`);
       }
-    }
 
-    // Delete original video file
-    try {
-      await opfsManager.deleteFile(fileHandleId);
-      console.log(`Deleted OPFS file: ${fileHandleId}`);
-    } catch (error) {
-      console.error(`Failed to delete OPFS file ${fileHandleId}:`, error);
+      // Delete the sequence directory (fileHandleId is the base directory path)
+      try {
+        await opfsManager.deleteDirectory(fileHandleId);
+        console.log(`Deleted sequence directory: ${fileHandleId}`);
+      } catch (error) {
+        console.error(`Failed to delete sequence directory ${fileHandleId}:`, error);
+      }
+    } else {
+      // Regular video: delete extracted frames using getFramePath pattern
+      if (extractedFrameFormat && frameCount > 0) {
+        try {
+          await deleteVideoFrames(fileHandleId, frameCount, extractedFrameFormat);
+          console.log(`Deleted ${frameCount} extracted frames for: ${fileHandleId}`);
+
+          // Also delete the frames folder
+          const framesFolder = getFramesFolderPath(fileHandleId);
+          try {
+            await opfsManager.deleteDirectory(framesFolder);
+            console.log(`Deleted frames folder: ${framesFolder}`);
+          } catch (err) {
+            // Folder might already be empty or not exist
+            console.warn(`Could not delete frames folder ${framesFolder}:`, err);
+          }
+        } catch (error) {
+          console.error(`Failed to delete extracted frames for ${fileHandleId}:`, error);
+        }
+      }
+
+      // Delete original video file
+      try {
+        await opfsManager.deleteFile(fileHandleId);
+        console.log(`Deleted OPFS file: ${fileHandleId}`);
+      } catch (error) {
+        console.error(`Failed to delete OPFS file ${fileHandleId}:`, error);
+      }
     }
   } else if (isImageAsset(asset)) {
     const { fileHandleId } = asset.metadata;

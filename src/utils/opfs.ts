@@ -178,6 +178,37 @@ export class OPFSManager {
     }
 
     /**
+     * Delete a directory and all its contents from OPFS
+     * @param path - The path to the directory
+     */
+    async deleteDirectory(path: string): Promise<void> {
+        if (!this.initialized) {
+            await this.init();
+        }
+
+        if (!this.root) {
+            throw new Error('OPFS not initialized');
+        }
+
+        try {
+            const pathParts = path.split('/');
+            let parentDir = this.root;
+
+            // Navigate to the parent directory
+            for (let i = 0; i < pathParts.length - 1; i++) {
+                parentDir = await parentDir.getDirectoryHandle(pathParts[i]);
+            }
+
+            // Delete the directory recursively
+            const dirName = pathParts[pathParts.length - 1];
+            await parentDir.removeEntry(dirName, { recursive: true });
+        } catch (error) {
+            console.error('Failed to delete directory from OPFS:', error);
+            throw new Error(`Failed to delete directory: ${path}`);
+        }
+    }
+
+    /**
      * Get metadata about a stored file
      * @param path - The path to the file
      * @returns File metadata
