@@ -13,14 +13,36 @@ import { useGraphStore } from '../../stores/graphStore';
 import { useAssetStore } from '../../stores/assetStore';
 import { useCompositionStore } from '../../stores/compositionStore';
 import { useLayerStore } from '../../stores/layerStore';
-import { isSourceNode, isOperationNode } from '../../types/scene-graph';
-import type { SourceNode, OperationNode, BlurParams, ColorCorrectParams } from '../../types/scene-graph';
-import { isVideoAsset, getAssetDimensions } from '../../types/assets';
+import { 
+  isSourceNode, 
+  isOperationNode, 
+  createLayer,
+  type SourceNode, 
+  type OperationNode, 
+  type EmptyNode, 
+  type BlurParams, 
+  type ColorCorrectParams 
+} from '../../types/scene-graph';
+import { 
+  isVideoAsset, 
+  getAssetDimensions, 
+  getAssetFrameCount
+} from '../../types/assets';
+// FIXED: Imported factory functions from the correct utility file
+import { 
+  createAssetFromFile, 
+  createImageSequenceAsset 
+} from '../../utils/asset-factory';
+import { detectImageSequences } from '../../utils/image-sequence';
 import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import { X, GripVertical, CircleDot, Palette, Move, FileVideo, Image, Shapes, Layers } from 'lucide-react';
+import { 
+  X, GripVertical, CircleDot, Palette, Move, 
+  FileVideo, Image, Shapes, Layers, SquareDashed, Loader2 
+} from 'lucide-react';
 
 // =============================================================================
 // Source Node Properties Editor
@@ -287,8 +309,200 @@ function SourceNodeEditor({ node }: SourceNodeEditorProps) {
             max={1}
             step={0.01}
             onValueChange={(v) => updateTransform('opacity', v[0])}
-          />
+            />
         </div>
+      </Card>
+    </div>
+  );
+}
+
+// =============================================================================
+// Empty Node Properties Editor
+// =============================================================================
+
+interface EmptyNodeEditorProps {
+  node: EmptyNode;
+}
+
+function EmptyNodeEditor({ node }: EmptyNodeEditorProps) {
+  const addAsset = useAssetStore((s) => s.addAsset);
+  const addLayer = useLayerStore((s) => s.addLayer);
+  const updateNode = useGraphStore((s) => s.updateNode);
+
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Hidden inputs
+  const singleFileRef = useRef<HTMLInputElement>(null);
+  const videoFileRef = useRef<HTMLInputElement>(null);
+  const sequenceFileRef = useRef<HTMLInputElement>(null);
+
+  // --- Transformation Logic ---
+  const transformToSourceNode = async (processedAsset: any, name: string) => {
+    // 1. Add Asset
+    addAsset(processedAsset);
+
+    // 2. Create and Add Layer
+    const frameCount = getAssetFrameCount(processedAsset);
+    const newLayer = createLayer(processedAsset.id, name, frameCount);
+    addLayer(newLayer);
+
+    // 3. Mutate Node (Empty -> Source)
+    // We use updateNode to change the type property and add the layerId property.
+    updateNode(node.id, {
+      type: 'source',
+      layerId: newLayer.id,
+    } as any);
+  };
+
+  // --- File Handlers ---
+
+  const handleSingleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      const processedAsset = await createAssetFromFile(file, {
+        onProgress: (val) => console.log('Processing progress:', val),
+      });
+
+      await transformToSourceNode(processedAsset, file.name);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to process file.");
+    } finally {
+      setIsProcessing(false);
+      e.target.value = ''; // Reset input
+    }
+  };
+
+  const handleSequence = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      const fileArray = Array.from(files);
+      const sequences = detectImageSequences(fileArray);
+      
+      if (sequences.length === 0) {
+        throw new Error("No valid image sequence found.");
+      }
+
+      // Use the first valid sequence found
+      const bestSequence = sequences[0];
+      const processedAsset = await createImageSequenceAsset(bestSequence, {
+        fps: 24,
+      });
+
+      await transformToSourceNode(processedAsset, bestSequence.baseName);
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : "Failed to process sequence.");
+    } finally {
+      setIsProcessing(false);
+      e.target.value = ''; // Reset input
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center gap-3 pb-3 border-b border-border">
+        <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
+          <SquareDashed className="w-5 h-5 text-muted-foreground" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-sm truncate">Empty Slot</h3>
+          <p className="text-xs text-muted-foreground">Select content to fill</p>
+        </div>
+      </div>
+
+      <Card className="p-4 space-y-4">
+        {isProcessing ? (
+          <div className="flex flex-col items-center justify-center py-8 gap-3">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            <p className="text-xs text-muted-foreground">Processing Asset...</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <Label className="text-xs font-medium text-muted-foreground">Import Actions</Label>
+            
+            {/* 1. Image Sequence Button */}
+            <Button 
+              variant="outline" 
+              className="w-full justify-start gap-3 h-10"
+              onClick={() => sequenceFileRef.current?.click()}
+            >
+              <Layers className="w-4 h-4 text-orange-500" />
+              <div className="flex flex-col items-start text-xs">
+                 <span className="font-medium">Image Sequence</span>
+                 <span className="text-muted-foreground scale-90 origin-left">Select folder</span>
+              </div>
+            </Button>
+            <input
+              ref={sequenceFileRef}
+              type="file"
+              multiple
+              // @ts-expect-error - webkitdirectory is standard in modern browsers
+              webkitdirectory=""
+              className="hidden"
+              onChange={handleSequence}
+            />
+
+            {/* 2. Single File Button */}
+            <Button 
+              variant="outline" 
+              className="w-full justify-start gap-3 h-10"
+              onClick={() => singleFileRef.current?.click()}
+            >
+              <Image className="w-4 h-4 text-green-500" />
+              <div className="flex flex-col items-start text-xs">
+                 <span className="font-medium">Single Image</span>
+                 <span className="text-muted-foreground scale-90 origin-left">PNG, JPG, WebP</span>
+              </div>
+            </Button>
+            <input
+              ref={singleFileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleSingleFile}
+            />
+
+            {/* 3. Video File Button */}
+            <Button 
+              variant="outline" 
+              className="w-full justify-start gap-3 h-10"
+              onClick={() => videoFileRef.current?.click()}
+            >
+              <FileVideo className="w-4 h-4 text-blue-500" />
+              <div className="flex flex-col items-start text-xs">
+                 <span className="font-medium">Video File</span>
+                 <span className="text-muted-foreground scale-90 origin-left">MP4, MOV, WebM</span>
+              </div>
+            </Button>
+            <input
+              ref={videoFileRef}
+              type="file"
+              accept="video/*"
+              className="hidden"
+              onChange={handleSingleFile} 
+            />
+
+            {error && (
+              <div className="p-2 bg-destructive/10 rounded text-xs text-destructive flex items-center gap-2">
+                <CircleDot className="w-3 h-3" />
+                {error}
+              </div>
+            )}
+          </div>
+        )}
       </Card>
     </div>
   );
@@ -470,14 +684,8 @@ function OperationNodeEditor({ node }: OperationNodeEditorProps) {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3 pb-3 border-b border-border">
-        <div className={cn(
-          'w-10 h-10 rounded-lg flex items-center justify-center',
-          node.isEnabled ? 'bg-muted' : 'bg-muted/50'
-        )}>
-          <IconComponent className={cn(
-            'w-5 h-5',
-            node.isEnabled ? 'text-muted-foreground' : 'text-muted-foreground/50'
-          )} />
+        <div className="w-10 h-10 rounded-lg flex items-center justify-center">
+          <IconComponent className="w-5 h-5 text-primary" />
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold text-sm truncate">{node.label || operationLabels[node.operationType]}</h3>
@@ -617,6 +825,9 @@ export function PropertiesPanel() {
             )}
             {isOperationNode(selectedNode) && (
               <OperationNodeEditor node={selectedNode} />
+            )}
+            {selectedNode.type === 'empty' && (
+              <EmptyNodeEditor node={selectedNode as EmptyNode} />
             )}
           </>
         ) : (

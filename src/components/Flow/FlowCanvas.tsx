@@ -17,8 +17,9 @@ import { initializeCompositionSystem } from '../../stores/compositionStore';
 import { useCommandMenuStore } from '../../stores/commandMenuStore';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { NodeCommandMenu } from './NodeCommandMenu';
-import { SourceNodeComponent, OperationNodeComponent, GroupNodeComponent, BaseNode } from '../nodes';
+import { SourceNodeComponent, OperationNodeComponent, GroupNodeComponent } from '../nodes';
 import { ZoomInvariantEdge, ZoomInvariantConnectionLine, ClickConnectionLine } from '../edges';
+import { EmptyNodeComponent } from '../nodes/EmptyNodeComponent';
 
 // Component to initialize hotkeys inside ReactFlow context
 function CanvasHotkeys() {
@@ -35,10 +36,9 @@ function ClipboardHandler() {
 // Define node types for new architecture
 const nodeTypes = {
     source: SourceNodeComponent,
+    empty: EmptyNodeComponent,
     operation: OperationNodeComponent,
     group: GroupNodeComponent,
-    // Legacy fallback
-    default: BaseNode,
 };
 
 const edgeTypes = {
@@ -134,8 +134,8 @@ export function FlowCanvas() {
     const onNodeDoubleClick = useCallback((_event: React.MouseEvent, node: Node) => {
         fitView({
             nodes: [{ id: node.id }],
-            duration: 300,
-            padding: 0.25,
+            duration: 150,
+            padding: 0.2,
         });
     }, [fitView]);
 

@@ -9,24 +9,42 @@ import {
     CommandItem,
 } from '@/components/ui/command';
 import { useGraphStore } from '../../stores/graphStore';
-import { createOperationNode, type OperationType } from '../../types/scene-graph';
-import { CircleDot, Palette, Move } from 'lucide-react';
+import { createOperationNode, createEmptyNode, type OperationType } from '../../types/scene-graph';
+import { CircleDot, Palette, Move, Folder} from 'lucide-react';
 
 // =============================================================================
 // Node Registry for Command Menu
 // =============================================================================
 
-interface NodeTypeDefinition {
-    type: 'operation';
-    operationType: OperationType;
+interface BaseNodeTypeDefinition{
+    type: 'source' | 'operation';
     label: string;
     description: string;
     icon: string;
-    category: 'effect' | 'transform';
+    category: 'source' | 'effect' | 'transform';
 }
 
+interface SourceNodeTypeDefinition extends BaseNodeTypeDefinition{
+    type: 'source';
+    sourceType: 'video' | 'sequence' | 'image' | 'svg';
+}
+
+interface OperationNodeTypeDefinition extends BaseNodeTypeDefinition{
+    type: 'operation';
+    operationType: OperationType;
+}
+
+type NodeTypeDefinition = SourceNodeTypeDefinition | OperationNodeTypeDefinition;
+
+
 const NEW_NODE_REGISTRY: NodeTypeDefinition[] = [
-    // Effect operations
+    {
+        type: 'source',
+        label: 'File',
+        description: 'Load media, such as images, videos, and svgs',
+        icon: 'Folder',
+        category: 'source',
+    } as SourceNodeTypeDefinition,
     {
         type: 'operation',
         operationType: 'blur',
@@ -34,7 +52,7 @@ const NEW_NODE_REGISTRY: NodeTypeDefinition[] = [
         description: 'Gaussian blur effect',
         icon: 'CircleDot',
         category: 'effect',
-    },
+    } as OperationNodeTypeDefinition,
     {
         type: 'operation',
         operationType: 'color_correct',
@@ -42,8 +60,7 @@ const NEW_NODE_REGISTRY: NodeTypeDefinition[] = [
         description: 'Brightness, contrast, saturation, exposure',
         icon: 'Palette',
         category: 'effect',
-    },
-    // Transform operations (future)
+    } as OperationNodeTypeDefinition,
     {
         type: 'operation',
         operationType: 'transform',
@@ -51,7 +68,7 @@ const NEW_NODE_REGISTRY: NodeTypeDefinition[] = [
         description: 'Position, scale, rotation',
         icon: 'Move',
         category: 'transform',
-    },
+    } as OperationNodeTypeDefinition,
 ];
 
 // Map icon names to components
@@ -59,6 +76,7 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
     CircleDot,
     Palette,
     Move,
+    Folder,
 };
 
 // =============================================================================
@@ -93,11 +111,15 @@ export function NodeCommandMenu({ open, onOpenChange }: NodeCommandMenuProps) {
             y: screenCenterY,
         });
 
-        // Create the appropriate node type
+        if (nodeDef.type === 'source'){
+            const newNode = createEmptyNode(flowPosition);
+            addNode(newNode);
+        }
         if (nodeDef.type === 'operation') {
             const newNode = createOperationNode(nodeDef.operationType, flowPosition);
             addNode(newNode);
         }
+       
 
         onOpenChange(false);
     }, [screenToFlowPosition, addNode, onOpenChange]);
@@ -112,6 +134,7 @@ export function NodeCommandMenu({ open, onOpenChange }: NodeCommandMenuProps) {
     }, {} as Record<string, NodeTypeDefinition[]>);
 
     const categoryLabels: Record<string, string> = {
+        source: 'Source Assets',
         effect: 'Effect Operations',
         transform: 'Transform Operations',
     };
@@ -131,12 +154,7 @@ export function NodeCommandMenu({ open, onOpenChange }: NodeCommandMenuProps) {
             <CommandList>
                 <CommandEmpty>No operations found.</CommandEmpty>
 
-                {/* Note about source nodes */}
-                <CommandGroup heading="Source Nodes">
-                    <div className="px-2 py-2 text-sm text-muted-foreground">
-                        Drop video or image files onto the canvas to create source nodes.
-                    </div>
-                </CommandGroup>
+            
 
                 {/* Operation nodes */}
                 {Object.entries(nodesByCategory).map(([category, nodes]) => (
@@ -145,7 +163,7 @@ export function NodeCommandMenu({ open, onOpenChange }: NodeCommandMenuProps) {
                             const IconComponent = iconMap[node.icon] || CircleDot;
                             return (
                                 <CommandItem
-                                    key={`${node.type}-${node.operationType}`}
+                                    key={`${node.type}-${node.type === 'operation' ? node.operationType : node.label}`}
                                     value={`${node.label} ${node.description}`}
                                     onSelect={() => createNode(node)}
                                 >

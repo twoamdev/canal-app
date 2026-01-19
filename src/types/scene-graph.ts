@@ -247,6 +247,10 @@ export interface SourceNode extends BaseSceneNode {
   layerId: string;
 }
 
+export interface EmptyNode extends BaseSceneNode {
+  type: 'empty';
+}
+
 /**
  * Operation node - applies an effect/transform to the upstream signal
  */
@@ -276,7 +280,7 @@ export interface GroupNode extends BaseSceneNode {
 /**
  * Union type for all scene nodes
  */
-export type SceneNode = SourceNode | OperationNode | GroupNode;
+export type SceneNode = SourceNode | EmptyNode | OperationNode | GroupNode;
 
 // =============================================================================
 // Type Guards
@@ -346,6 +350,16 @@ export function createSourceNode(
     type: 'source',
     position,
     layerId,
+  };
+}
+
+export function createEmptyNode(
+  position: Position2D = { x: 0, y: 0 }
+): EmptyNode {
+  return {
+    id: generateNodeId(),
+    type: 'empty',
+    position,
   };
 }
 

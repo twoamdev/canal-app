@@ -10,13 +10,14 @@
  *   then transfers to visible canvas via drawImage
  */
 
+/*
 import { useRef, useEffect, useCallback, useMemo } from 'react';
 import { RenderPipeline } from '../gpu/RenderPipeline';
 import { WebGLContext } from '../gpu/WebGLContext';
 import { TexturePool } from '../gpu/TexturePool';
 import type { RenderNode } from '../gpu/RenderPipeline';
 import type { GPUTexture } from '../gpu/types';
-import type { EffectConfig } from '../types/nodes';
+//import type { EffectConfig } from '../types/nodes';
 
 // Import effects to register them
 import '../gpu/effects/ColorAdjustEffect';
@@ -283,3 +284,4 @@ export function useGPURenderer(
 
   return [state, actions] as const;
 }
+*/
