@@ -289,11 +289,11 @@ export function TimelineScrubber() {
   }, [frameEnd]);
 
   return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
+<div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
       {/* Timeline container - fixed width */}
-      <div className="w-[600px] h-10 bg-zinc-900/90 backdrop-blur-sm rounded-full flex items-center px-1 shadow-lg border border-zinc-800">
+      <div className="w-[600px] h-10 bg-zinc-800  backdrop-blur-sm rounded-md flex items-center shadow-lg border-t border-t-zinc-700 px-1">
         {/* Start frame pill - editable */}
-        <div className="flex-shrink-0 h-8 min-w-[52px] bg-zinc-800 rounded-full flex items-center justify-center">
+        <div className="rounded-sm flex justify-center align-center py-[7px] text-zinc-300 hover:text-zinc-200 bg-zinc-700/50 hover:bg-zinc-600 ">
           <input
             type="text"
             inputMode="numeric"
@@ -302,28 +302,28 @@ export function TimelineScrubber() {
             onChange={handleStartChange}
             onBlur={handleStartBlur}
             onKeyDown={handleStartKeyDown}
-            className="w-12 h-8 text-sm font-medium text-zinc-300 tabular-nums bg-transparent text-center focus:outline-none focus:text-white"
+            className="max-w-12 text-xs  tabular-nums bg-transparent text-center focus:outline-none focus:text-white"
           />
         </div>
 
         {/* Timeline track */}
         <div
           ref={trackRef}
-          className="flex-1 h-full relative cursor-pointer mx-2"
+          className="flex-1 h-full relative cursor-pointer mx-[18px]"
           onMouseDown={handleMouseDown}
         >
-          {/* Tick marks */}
-          <div className="absolute inset-x-0 bottom-2 h-3">
+          {/* Tick marks - UPDATED: Changed from 'bottom-0' to 'inset-0' to fill height */}
+          <div className="absolute inset-0">
             {ticks().map(({ frame, isMajor, x }) => (
               <div
                 key={frame}
-                className="absolute bottom-0"
+                // UPDATED: Changed 'bottom-0' to 'top-1/2 -translate-y-1/2' for centering
+                className="absolute top-1/2 -translate-y-1/2"
                 style={{ left: `${x}px` }}
               >
                 <div
-                  className={`w-px ${
-                    isMajor ? 'h-3 bg-zinc-600' : 'h-1.5 bg-zinc-700'
-                  }`}
+                  className={`w-px ${isMajor ? 'h-3 bg-zinc-500' : 'h-1.5 bg-zinc-500/50'
+                    }`}
                 />
               </div>
             ))}
@@ -331,11 +331,22 @@ export function TimelineScrubber() {
 
           {/* Current frame playhead with fused frame number */}
           <div
-            className="absolute top-1/2 -translate-y-1/2 pointer-events-none"
+            className="absolute top-1/2 group cursor-pointer"
             style={{ left: `${scrubberPercent}%`, transform: `translateX(-50%) translateY(-50%)` }}
           >
-            <div className="h-8 min-w-[52px] px-3 bg-zinc-700 rounded-full flex items-center justify-center border border-zinc-600 shadow-md">
-              <span className="text-sm font-medium text-white tabular-nums">
+            <div
+              className="
+      px-2 py-1 min-w-[30px] min-h-[30px] bg-zinc-700 hover:bg-zinc-700 rounded-sm hover:rounded-md flex items-center justify-center border-t border-zinc-500 shadow-md
+      
+      /* Animation Classes */
+      origin-bottom             
+      transition-transform      
+      duration-50              
+      ease-out                  
+      group-hover:scale-[1.5]   
+    "
+            >
+              <span className="text-xs text-white tabular-nums">
                 {currentFrame}
               </span>
             </div>
@@ -343,7 +354,7 @@ export function TimelineScrubber() {
         </div>
 
         {/* End frame pill - editable */}
-        <div className="flex-shrink-0 h-8 min-w-[52px] bg-zinc-800 rounded-full flex items-center justify-center">
+        <div className=" rounded-sm  flex justify-center align-center py-[7px] text-zinc-300 hover:text-zinc-200 bg-zinc-700/50 hover:bg-zinc-600 ">
           <input
             type="text"
             inputMode="numeric"
@@ -352,7 +363,7 @@ export function TimelineScrubber() {
             onChange={handleEndChange}
             onBlur={handleEndBlur}
             onKeyDown={handleEndKeyDown}
-            className="w-12 h-8 text-sm font-medium text-zinc-300 tabular-nums bg-transparent text-center focus:outline-none focus:text-white"
+            className="max-w-12 text-xs tabular-nums bg-transparent text-center focus:outline-none focus:text-white"
           />
         </div>
       </div>
