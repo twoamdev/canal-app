@@ -82,19 +82,52 @@ export interface ParsedSVG {
 
 /**
  * Parse a color value from SVG attribute
+ * Handles solid colors, 'none', and url() references
  */
 function parseColor(value: string | null | undefined): string | undefined {
   if (!value || value === 'none' || value === 'transparent') {
     return value === 'none' ? 'none' : undefined;
   }
 
-  // Handle url() references (gradients, patterns) - not supported, treat as none
+  // Handle url() references (gradients, patterns, masks)
+  // For now, we'll return a fallback color but preserve the info that it was a reference
+  // This allows shapes to at least render with some fill
   if (value.startsWith('url(')) {
-    return undefined;
+    // Return a distinguishable placeholder - the actual gradient/pattern won't render
+    // but at least the shape will be visible
+    return '#808080'; // Gray fallback for url() references
   }
 
   // Return the color value (CSS color string)
   return value.trim();
+}
+
+/**
+ * Set of SVG elements that are definition containers (not visual content)
+ * These should be skipped when extracting renderable paths
+ */
+const NON_VISUAL_ELEMENTS = new Set([
+  'defs',
+  'mask',
+  'clippath',
+  'filter',
+  'symbol',
+  'lineargradient',
+  'radialgradient',
+  'pattern',
+  'marker',
+  'style',
+  'script',
+  'title',
+  'desc',
+  'metadata',
+]);
+
+/**
+ * Check if an element is a non-visual definition element
+ */
+function isNonVisualElement(tagName: string): boolean {
+  return NON_VISUAL_ELEMENTS.has(tagName.toLowerCase());
 }
 
 /**
@@ -357,6 +390,19 @@ function inheritStyle(child: SVGPathStyle, parent: SVGPathStyle): SVGPathStyle {
 // =============================================================================
 
 /**
+ * Get the href from a <use> element (handles both href and xlink:href)
+ */
+function getUseHref(element: Element): string | null {
+  // Try standard href first
+  let href = element.getAttribute('href');
+  if (!href) {
+    // Fall back to xlink:href for older SVGs
+    href = element.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+  }
+  return href;
+}
+
+/**
  * Parse an SVG string into structured data
  */
 export function parseSVGString(svgString: string): ParsedSVG {
@@ -408,9 +454,44 @@ export function parseSVGString(svgString: string): ParsedSVG {
   // Find all path elements and extract their data
   const paths: ParsedSVGPath[] = [];
 
+  // Track processed <use> references to avoid infinite loops
+  const processedUseRefs = new Set<string>();
+
   // Helper to process elements recursively
-  function processElement(element: Element, parentStyle: SVGPathStyle): void {
+  function processElement(element: Element, parentStyle: SVGPathStyle, offsetX = 0, offsetY = 0): void {
+    // Skip non-visual definition elements entirely
+    if (isNonVisualElement(element.tagName)) {
+      return;
+    }
+
     const currentStyle = inheritStyle(extractStyle(element), parentStyle);
+
+    // Handle <use> elements by resolving their references
+    if (element.tagName === 'use') {
+      const href = getUseHref(element);
+      if (href && href.startsWith('#')) {
+        const refId = href.slice(1);
+
+        // Avoid infinite loops from circular references
+        if (processedUseRefs.has(refId)) {
+          return;
+        }
+        processedUseRefs.add(refId);
+
+        const referencedElement = doc.getElementById(refId);
+        if (referencedElement) {
+          // Get x, y offset from <use> element
+          const useX = parseFloat(element.getAttribute('x') || '0');
+          const useY = parseFloat(element.getAttribute('y') || '0');
+
+          // Process the referenced element with the combined offset
+          processElement(referencedElement, currentStyle, offsetX + useX, offsetY + useY);
+        }
+
+        processedUseRefs.delete(refId);
+      }
+      return;
+    }
 
     if (element.tagName === 'path') {
       const d = element.getAttribute('d');
@@ -419,11 +500,22 @@ export function parseSVGString(svgString: string): ParsedSVG {
           const commands = makeAbsolute(parseSVG(d));
           const bounds = calculatePathBounds(commands);
 
+          // Apply offset from <use> element if any
+          const finalPathData = (offsetX !== 0 || offsetY !== 0)
+            ? translatePathData(d, offsetX, offsetY)
+            : d;
+          const finalBounds = {
+            x: bounds.x + offsetX,
+            y: bounds.y + offsetY,
+            width: bounds.width,
+            height: bounds.height,
+          };
+
           paths.push({
-            pathData: d,
-            commands,
+            pathData: finalPathData,
+            commands: (offsetX !== 0 || offsetY !== 0) ? makeAbsolute(parseSVG(finalPathData)) : commands,
             style: currentStyle,
-            bounds,
+            bounds: finalBounds,
           });
         } catch (e) {
           console.warn('Failed to parse path:', d, e);
@@ -433,8 +525,8 @@ export function parseSVGString(svgString: string): ParsedSVG {
 
     // Also handle basic shapes by converting to paths
     if (element.tagName === 'rect') {
-      const x = parseFloat(element.getAttribute('x') || '0');
-      const y = parseFloat(element.getAttribute('y') || '0');
+      const x = parseFloat(element.getAttribute('x') || '0') + offsetX;
+      const y = parseFloat(element.getAttribute('y') || '0') + offsetY;
       const width = parseFloat(element.getAttribute('width') || '0');
       const height = parseFloat(element.getAttribute('height') || '0');
       const rx = parseFloat(element.getAttribute('rx') || '0');
@@ -462,8 +554,8 @@ export function parseSVGString(svgString: string): ParsedSVG {
     }
 
     if (element.tagName === 'circle') {
-      const cx = parseFloat(element.getAttribute('cx') || '0');
-      const cy = parseFloat(element.getAttribute('cy') || '0');
+      const cx = parseFloat(element.getAttribute('cx') || '0') + offsetX;
+      const cy = parseFloat(element.getAttribute('cy') || '0') + offsetY;
       const r = parseFloat(element.getAttribute('r') || '0');
 
       if (r > 0) {
@@ -480,8 +572,8 @@ export function parseSVGString(svgString: string): ParsedSVG {
     }
 
     if (element.tagName === 'ellipse') {
-      const cx = parseFloat(element.getAttribute('cx') || '0');
-      const cy = parseFloat(element.getAttribute('cy') || '0');
+      const cx = parseFloat(element.getAttribute('cx') || '0') + offsetX;
+      const cy = parseFloat(element.getAttribute('cy') || '0') + offsetY;
       const rx = parseFloat(element.getAttribute('rx') || '0');
       const ry = parseFloat(element.getAttribute('ry') || '0');
 
@@ -498,10 +590,10 @@ export function parseSVGString(svgString: string): ParsedSVG {
     }
 
     if (element.tagName === 'line') {
-      const x1 = parseFloat(element.getAttribute('x1') || '0');
-      const y1 = parseFloat(element.getAttribute('y1') || '0');
-      const x2 = parseFloat(element.getAttribute('x2') || '0');
-      const y2 = parseFloat(element.getAttribute('y2') || '0');
+      const x1 = parseFloat(element.getAttribute('x1') || '0') + offsetX;
+      const y1 = parseFloat(element.getAttribute('y1') || '0') + offsetY;
+      const x2 = parseFloat(element.getAttribute('x2') || '0') + offsetX;
+      const y2 = parseFloat(element.getAttribute('y2') || '0') + offsetY;
 
       const d = `M${x1},${y1} L${x2},${y2}`;
       const commands = makeAbsolute(parseSVG(d));
@@ -523,9 +615,10 @@ export function parseSVGString(svgString: string): ParsedSVG {
       if (points) {
         const coords = points.trim().split(/[\s,]+/).map(parseFloat);
         if (coords.length >= 4 && coords.every((n) => !isNaN(n))) {
-          let d = `M${coords[0]},${coords[1]}`;
+          // Apply offset to all coordinates
+          let d = `M${coords[0] + offsetX},${coords[1] + offsetY}`;
           for (let i = 2; i < coords.length; i += 2) {
-            d += ` L${coords[i]},${coords[i + 1]}`;
+            d += ` L${coords[i] + offsetX},${coords[i + 1] + offsetY}`;
           }
           if (element.tagName === 'polygon') {
             d += ' Z';
@@ -543,9 +636,9 @@ export function parseSVGString(svgString: string): ParsedSVG {
       }
     }
 
-    // Process children
+    // Process children with the same offset
     for (const child of element.children) {
-      processElement(child, currentStyle);
+      processElement(child, currentStyle, offsetX, offsetY);
     }
   }
 
@@ -723,6 +816,9 @@ export function parseSVGStructure(svgString: string): SVGStructure {
 
   let nodeCounter = 0;
 
+  // Track processed <use> references to avoid infinite loops
+  const processedUseRefs = new Set<string>();
+
   /**
    * Convert style to SVGNodeStyle format
    */
@@ -742,9 +838,54 @@ export function parseSVGStructure(svgString: string): SVGStructure {
    */
   function buildNode(element: Element, parentStyle: SVGPathStyle, depth: number): SVGNode | null {
     const tagName = element.tagName.toLowerCase();
+
+    // Skip non-visual definition elements entirely
+    if (isNonVisualElement(tagName)) {
+      return null;
+    }
+
     const currentStyle = inheritStyle(extractStyle(element), parentStyle);
     const transform = element.getAttribute('transform') || undefined;
     const elementId = element.id || undefined;
+
+    // Handle <use> elements by resolving their references
+    if (tagName === 'use') {
+      const href = getUseHref(element);
+      if (href && href.startsWith('#')) {
+        const refId = href.slice(1);
+
+        // Avoid infinite loops from circular references
+        if (processedUseRefs.has(refId)) {
+          return null;
+        }
+        processedUseRefs.add(refId);
+
+        const referencedElement = doc.getElementById(refId);
+        if (referencedElement) {
+          // Get x, y offset from <use> element
+          const useX = parseFloat(element.getAttribute('x') || '0');
+          const useY = parseFloat(element.getAttribute('y') || '0');
+
+          // Build the referenced element and apply offset via transform
+          const refNode = buildNode(referencedElement, currentStyle, depth);
+          processedUseRefs.delete(refId);
+
+          if (refNode) {
+            // Add the use element's position as a transform
+            const useTransform = (useX !== 0 || useY !== 0)
+              ? `translate(${useX}, ${useY})${transform ? ' ' + transform : ''}`
+              : transform;
+
+            return {
+              ...refNode,
+              transform: useTransform || refNode.transform,
+            };
+          }
+        }
+        processedUseRefs.delete(refId);
+      }
+      return null;
+    }
 
     // Handle groups - recurse into children
     if (tagName === 'g') {
