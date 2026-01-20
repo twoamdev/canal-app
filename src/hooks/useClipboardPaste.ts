@@ -3,8 +3,7 @@
  *
  * Handles clipboard paste events to create assets from pasted content.
  * Supports:
- * - SVG content (text/plain or image/svg+xml)
- *   - Multi-path SVGs are split into individual shape assets + GroupNode
+ * - SVG content (text/plain or image/svg+xml) as single ShapeAsset
  * - Images (image/png, image/jpeg, etc.)
  */
 
@@ -13,29 +12,20 @@ import { useReactFlow } from '@xyflow/react';
 import { useAssetStore } from '../stores/assetStore';
 import { useGraphStore } from '../stores/graphStore';
 import { useLayerStore } from '../stores/layerStore';
-import { useGroupStore } from '../stores/groupStore';
 import {
-  createSplitShapeAssetsFromSVGString,
+  createShapeAssetFromSVGString,
   createPlaceholderImageAsset,
   createImageAsset,
 } from '../utils/asset-factory';
 import { extractSVGFromString } from '../utils/svg-parser';
-import {
-  createSourceNode,
-  createLayer,
-  createGroup,
-  createGroupNode,
-} from '../types/scene-graph';
+import { createSourceNode, createLayer } from '../types/scene-graph';
 
 export function useClipboardPaste() {
   const { getViewport } = useReactFlow();
   const addAsset = useAssetStore((state) => state.addAsset);
   const updateAsset = useAssetStore((state) => state.updateAsset);
   const addNode = useGraphStore((state) => state.addNode);
-  const addEdge = useGraphStore((state) => state.addEdge);
   const addLayer = useLayerStore((state) => state.addLayer);
-  const updateLayer = useLayerStore((state) => state.updateLayer);
-  const addGroup = useGroupStore((state) => state.addGroup);
 
   const handlePaste = useCallback(
     async (event: ClipboardEvent) => {
@@ -55,105 +45,22 @@ export function useClipboardPaste() {
       const centerX = (-viewport.x + window.innerWidth / 2) / viewport.zoom;
       const centerY = (-viewport.y + window.innerHeight / 2) / viewport.zoom;
 
-      // Helper to create shapes from SVG string (handles multi-path splitting)
-      const createShapesFromSVG = (svgString: string, name: string) => {
-        const splitResult = createSplitShapeAssetsFromSVGString(svgString, name);
-        const { assets } = splitResult;
+      // Helper to create a single shape from SVG string (no splitting)
+      const createShapeFromSVG = (svgString: string, name: string) => {
+        const shapeAsset = createShapeAssetFromSVGString(svgString, name);
+        addAsset(shapeAsset);
 
-        if (assets.length === 0) {
-          console.warn('[Clipboard] No paths found in SVG');
-          return;
-        }
+        const layer = createLayer(shapeAsset.id, shapeAsset.name, 1);
+        addLayer(layer);
 
-        // Single path - simple case, just create one node
-        if (assets.length === 1) {
-          const shapeAsset = assets[0];
-          addAsset(shapeAsset);
-
-          const layer = createLayer(shapeAsset.id, shapeAsset.name, 1);
-          addLayer(layer);
-
-          const sourceNode = createSourceNode(layer.id, {
-            x: centerX - 100,
-            y: centerY - 100,
-          });
-          addNode(sourceNode);
-
-          console.log(
-            `[Clipboard] Created shape: ${shapeAsset.intrinsicWidth}x${shapeAsset.intrinsicHeight}`
-          );
-          return;
-        }
-
-        // Multiple paths - create individual nodes and wire to GroupNode
-        console.log(`[Clipboard] Splitting SVG into ${assets.length} paths`);
-
-        const sourceNodeIds: string[] = [];
-
-        // Layout constants
-        const nodeWidth = 220;
-        const nodeSpacing = 30;
-        const startX = centerX - (assets.length * (nodeWidth + nodeSpacing)) / 2;
-
-        // Create assets, layers, and source nodes for each path
-        // Process in SVG order (first = bottom of stack)
-        assets.forEach((shapeAsset, index) => {
-          addAsset(shapeAsset);
-
-          const layer = createLayer(shapeAsset.id, shapeAsset.name, 1);
-          addLayer(layer);
-
-          // Set layer position from the original SVG position
-          
-          const originalPos = shapeAsset.metadata.originalPosition;
-          if (originalPos) {
-            updateLayer(layer.id, {
-              baseTransform: {
-                ...layer.baseTransform,
-                position: { x: originalPos.x, y: originalPos.y },
-              },
-            });
-          }
-          
-
-          // Position source nodes horizontally
-          const nodeX = startX + index * (nodeWidth + nodeSpacing);
-          const sourceNode = createSourceNode(layer.id, {
-            x: nodeX,
-            y: centerY - 150,
-          });
-          addNode(sourceNode);
-          sourceNodeIds.push(sourceNode.id);
-
-          console.log(
-            `[Clipboard] Created path ${index + 1}: ${shapeAsset.name}`
-          );
+        const sourceNode = createSourceNode(layer.id, {
+          x: centerX - 100,
+          y: centerY - 100,
         });
-
-        // Create a Group to hold all layers (in order: first = bottom)
-        // Create Group with empty members - connections will populate memberIds
-        const group = createGroup(name, [], 1);
-        addGroup(group);
-
-        // Create GroupNode positioned below the source nodes
-        const groupNode = createGroupNode(group.id, name, {
-          x: centerX - nodeWidth / 2,
-          y: centerY + 100,
-        });
-        addNode(groupNode);
-
-        // Connect all source nodes to the group node in order (index 0 = input-0 = bottom layer)
-        sourceNodeIds.forEach((sourceId, index) => {
-          addEdge({
-            id: `edge_svg_${Date.now()}_${index}`,
-            source: sourceId,
-            target: groupNode.id,
-            targetHandle: `input-${index}`,
-          });
-        });
+        addNode(sourceNode);
 
         console.log(
-          `[Clipboard] Created GroupNode "${name}" with ${assets.length} layers`
+          `[Clipboard] Created shape: ${shapeAsset.intrinsicWidth}x${shapeAsset.intrinsicHeight}`
         );
       };
 
@@ -165,7 +72,7 @@ export function useClipboardPaste() {
         if (svgContent) {
           event.preventDefault();
           try {
-            createShapesFromSVG(svgContent, 'Pasted SVG');
+            createShapeFromSVG(svgContent, 'Pasted SVG');
           } catch (error) {
             console.error('Failed to parse pasted SVG from text:', error);
           }
@@ -180,7 +87,7 @@ export function useClipboardPaste() {
         if (svgContent) {
           event.preventDefault();
           try {
-            createShapesFromSVG(svgContent, 'Pasted SVG');
+            createShapeFromSVG(svgContent, 'Pasted SVG');
           } catch (error) {
             console.error('Failed to parse pasted SVG from HTML:', error);
           }
@@ -199,7 +106,7 @@ export function useClipboardPaste() {
           if (blob) {
             try {
               const svgText = await blob.text();
-              createShapesFromSVG(svgText, 'Pasted SVG');
+              createShapeFromSVG(svgText, 'Pasted SVG');
             } catch (error) {
               console.error('Failed to parse pasted SVG image:', error);
             }
@@ -248,7 +155,7 @@ export function useClipboardPaste() {
         }
       }
     },
-    [addAsset, updateAsset, addNode, addEdge, addLayer, updateLayer, addGroup, getViewport]
+    [addAsset, updateAsset, addNode, addLayer, getViewport]
   );
 
   useEffect(() => {

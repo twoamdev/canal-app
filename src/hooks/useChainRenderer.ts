@@ -150,46 +150,12 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
     // Find upstream chain
     const chain = findUpstreamChain(sceneGraph, nodeId);
 
-    if (!chain.isComplete || (!chain.sourceNode && !chain.groupNode)) {
+    if (!chain.isComplete || !chain.sourceNode) {
       setState((s) => ({ ...s, isLoading: false, error: null, hasUpstream: false }));
       return;
     }
 
     setState((s) => ({ ...s, hasUpstream: true }));
-
-    // If the chain has a GroupNode, we need to render the group
-    // For now, show a placeholder - full group compositing will be implemented later
-    if (chain.groupNode) {
-      // TODO: Implement group compositing
-      // For now, just show the first member if available
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      canvas.width = DEFAULT_VIEWER_WIDTH;
-      canvas.height = DEFAULT_VIEWER_HEIGHT;
-      drawCheckerboard(ctx, canvas.width, canvas.height);
-
-      // Draw placeholder text for group
-      ctx.fillStyle = 'rgba(147, 51, 234, 0.3)'; // purple-500
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.font = '14px system-ui';
-      ctx.fillStyle = 'white';
-      ctx.textAlign = 'center';
-      ctx.fillText('Group Compositing', canvas.width / 2, canvas.height / 2 - 10);
-      ctx.fillText('(Coming Soon)', canvas.width / 2, canvas.height / 2 + 10);
-
-      setState((s) => ({
-        ...s,
-        isLoading: false,
-        error: null,
-        hasUpstream: true,
-        dimensions: { width: DEFAULT_VIEWER_WIDTH, height: DEFAULT_VIEWER_HEIGHT },
-      }));
-      return;
-    }
 
     // Get the source layer
     const sourceLayer = layers[chain.sourceNode!.layerId];

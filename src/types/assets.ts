@@ -92,6 +92,60 @@ export interface ImageAsset extends BaseAsset {
 // Shape Asset
 // =============================================================================
 
+/**
+ * Bounding box for SVG elements
+ */
+export interface SVGBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Style properties for SVG elements
+ */
+export interface SVGNodeStyle {
+  fill?: string;
+  fillOpacity?: number;
+  fillRule?: 'evenodd' | 'nonzero';
+  stroke?: string;
+  strokeWidth?: number;
+  strokeOpacity?: number;
+}
+
+/**
+ * A node in the SVG structure tree (preserves group hierarchy)
+ */
+export interface SVGNode {
+  /** Element id attribute if present */
+  id?: string;
+  /** Display name (from id or generated) */
+  name?: string;
+  /** Element type */
+  type: 'group' | 'path' | 'rect' | 'circle' | 'ellipse' | 'line' | 'polygon' | 'polyline';
+  /** Bounding box */
+  bounds: SVGBounds;
+  /** Style properties (for leaf nodes) */
+  style?: SVGNodeStyle;
+  /** Path d attribute (for leaf nodes, converted from shapes) */
+  pathData?: string;
+  /** Child nodes (for groups) */
+  children?: SVGNode[];
+  /** Original transform attribute */
+  transform?: string;
+}
+
+/**
+ * Hierarchical structure of an SVG for smart splitting
+ */
+export interface SVGStructure {
+  viewBox?: SVGBounds;
+  dimensions?: { width: number; height: number };
+  /** Hierarchical node tree starting from SVG root */
+  root: SVGNode;
+}
+
 export interface ShapeAssetMetadata {
   /** SVG path d="" attribute (may contain multiple paths separated by newlines) */
   pathData: string;
@@ -119,6 +173,8 @@ export interface ShapeAssetMetadata {
   strokeDashoffset?: number;
   /** Original SVG source (for reference) */
   originalSVG?: string;
+  /** Hierarchical SVG structure for smart splitting */
+  svgStructure?: SVGStructure;
   /** Original position within the parent SVG (for split paths) */
   originalPosition?: { x: number; y: number };
   /** Multiple paths with individual styles (for complex SVGs) */

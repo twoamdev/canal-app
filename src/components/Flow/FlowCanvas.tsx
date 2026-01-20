@@ -17,7 +17,7 @@ import { initializeCompositionSystem } from '../../stores/compositionStore';
 import { useCommandMenuStore } from '../../stores/commandMenuStore';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { NodeCommandMenu } from './NodeCommandMenu';
-import { SourceNodeComponent, OperationNodeComponent, GroupNodeComponent } from '../nodes';
+import { SourceNodeComponent, OperationNodeComponent } from '../nodes';
 import { ZoomInvariantEdge, ZoomInvariantConnectionLine, ClickConnectionLine } from '../edges';
 import { EmptyNodeComponent } from '../nodes/EmptyNodeComponent';
 
@@ -38,7 +38,6 @@ const nodeTypes = {
     source: SourceNodeComponent,
     empty: EmptyNodeComponent,
     operation: OperationNodeComponent,
-    group: GroupNodeComponent,
 };
 
 const edgeTypes = {

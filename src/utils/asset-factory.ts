@@ -447,12 +447,14 @@ async function getImageDimensions(
 
 import {
   parseSVGString,
+  parseSVGStructure,
   isSVGFile,
   isSVGString,
   normalizeBounds,
   translatePathData,
   type ParsedSVG,
 } from './svg-parser';
+import type { SVGStructure } from '../types/assets';
 
 export interface CreateShapeAssetOptions {
   /** Fill color (CSS color string) */
@@ -552,7 +554,8 @@ export function createPlaceholderShapeAsset(
 export function createShapeAssetFromParsedSVG(
   name: string,
   parsed: ParsedSVG,
-  originalSVG?: string
+  originalSVG?: string,
+  svgStructure?: SVGStructure
 ): ShapeAsset {
   const now = Date.now();
 
@@ -592,6 +595,7 @@ export function createShapeAssetFromParsedSVG(
         strokeDasharray: path.style.strokeDasharray,
         strokeDashoffset: path.style.strokeDashoffset,
         originalSVG,
+        svgStructure,
       },
     };
   }
@@ -643,6 +647,7 @@ export function createShapeAssetFromParsedSVG(
       strokeDasharray: firstStyle.strokeDasharray,
       strokeDashoffset: firstStyle.strokeDashoffset,
       originalSVG,
+      svgStructure,
       paths,
     },
   };
@@ -654,11 +659,12 @@ export function createShapeAssetFromParsedSVG(
 export async function createShapeAssetFromSVGFile(file: File): Promise<ShapeAsset> {
   const svgText = await file.text();
   const parsed = parseSVGString(svgText);
+  const structure = parseSVGStructure(svgText);
 
   // Use filename without extension as name
   const name = file.name.replace(/\.svg$/i, '');
 
-  return createShapeAssetFromParsedSVG(name, parsed, svgText);
+  return createShapeAssetFromParsedSVG(name, parsed, svgText, structure);
 }
 
 /**
@@ -773,7 +779,8 @@ export function createShapeAssetFromSVGString(
   name: string = 'Pasted Shape'
 ): ShapeAsset {
   const parsed = parseSVGString(svgString);
-  return createShapeAssetFromParsedSVG(name, parsed, svgString);
+  const structure = parseSVGStructure(svgString);
+  return createShapeAssetFromParsedSVG(name, parsed, svgString, structure);
 }
 
 // Re-export SVG utilities for external use

@@ -3,24 +3,18 @@ import { type XYPosition } from '@xyflow/react';
 import { useAssetStore } from '../stores/assetStore';
 import { useGraphStore } from '../stores/graphStore';
 import { useLayerStore } from '../stores/layerStore';
-import { useGroupStore } from '../stores/groupStore';
 import { useTimelineStore } from '../stores/timelineStore';
 import {
   createAssetFromFile,
   createPlaceholderAsset,
   createPlaceholderSequenceAsset,
   createImageSequenceAsset,
-  createSplitShapeAssetsFromSVGFile,
+  createShapeAssetFromSVGFile,
   isVideoFile,
   isImageFile,
   isSVGFile,
 } from '../utils/asset-factory';
-import {
-  createSourceNode,
-  createLayer,
-  createGroup,
-  createGroupNode,
-} from '../types/scene-graph';
+import { createSourceNode, createLayer } from '../types/scene-graph';
 import { getAssetFrameCount } from '../types/assets';
 import { detectImageSequences, type DetectedSequence } from '../utils/image-sequence';
 
@@ -41,10 +35,8 @@ export function useFileImporter() {
   const addAsset = useAssetStore((state) => state.addAsset);
   const updateAsset = useAssetStore((state) => state.updateAsset);
   const addNode = useGraphStore((state) => state.addNode);
-  const addEdge = useGraphStore((state) => state.addEdge);
   const addLayer = useLayerStore((state) => state.addLayer);
   const updateLayer = useLayerStore((state) => state.updateLayer);
-  const addGroup = useGroupStore((state) => state.addGroup);
   const setFrameRange = useTimelineStore((state) => state.setFrameRange);
   const frameEnd = useTimelineStore((state) => state.frameEnd);
 
@@ -94,79 +86,20 @@ export function useFileImporter() {
   };
 
   /**
-   * Helper: Process SVG files immediately with path splitting
+   * Helper: Process SVG files as single assets (no splitting)
    */
   const processSVGFile = async (file: File, basePosition: XYPosition) => {
     try {
-      const splitResult = await createSplitShapeAssetsFromSVGFile(file);
-      const { assets } = splitResult;
-      const svgName = file.name.replace(/\.svg$/i, '');
+      const shapeAsset = await createShapeAssetFromSVGFile(file);
+      addAsset(shapeAsset);
 
-      if (assets.length === 0) {
-        console.warn(`[Importer] No paths found in SVG: ${file.name}`);
-        return 0;
-      }
+      const layer = createLayer(shapeAsset.id, shapeAsset.name, 1);
+      addLayer(layer);
 
-      // Single path - simple case
-      if (assets.length === 1) {
-        const shapeAsset = assets[0];
-        addAsset(shapeAsset);
-        const layer = createLayer(shapeAsset.id, shapeAsset.name, 1);
-        addLayer(layer);
-        const sourceNode = createSourceNode(layer.id, basePosition);
-        addNode(sourceNode);
-        return 1;
-      }
+      const sourceNode = createSourceNode(layer.id, basePosition);
+      addNode(sourceNode);
 
-      // Multiple paths - Group Logic
-      const sourceNodeIds: string[] = [];
-      const nodeWidth = 220;
-      const nodeSpacing = 30;
-      const startX = basePosition.x - (assets.length * (nodeWidth + nodeSpacing)) / 2;
-
-      assets.forEach((shapeAsset, index) => {
-        addAsset(shapeAsset);
-        const layer = createLayer(shapeAsset.id, shapeAsset.name, 1);
-        addLayer(layer);
-
-        // Recover original SVG position
-        const originalPos = shapeAsset.metadata.originalPosition;
-        if (originalPos) {
-          updateLayer(layer.id, {
-            baseTransform: {
-              ...layer.baseTransform,
-              position: { x: originalPos.x, y: originalPos.y },
-            },
-          });
-        }
-
-        const nodeX = startX + index * (nodeWidth + nodeSpacing);
-        const sourceNode = createSourceNode(layer.id, {
-          x: nodeX,
-          y: basePosition.y - 150,
-        });
-        addNode(sourceNode);
-        sourceNodeIds.push(sourceNode.id);
-      });
-
-      const group = createGroup(svgName, [], 1);
-      addGroup(group);
-
-      const groupNode = createGroupNode(group.id, svgName, {
-        x: basePosition.x - nodeWidth / 2,
-        y: basePosition.y + 100,
-      });
-      addNode(groupNode);
-
-      sourceNodeIds.forEach((sourceId, index) => {
-        addEdge({
-          id: `edge_svg_${Date.now()}_${index}`,
-          source: sourceId,
-          target: groupNode.id,
-          targetHandle: `input-${index}`,
-        });
-      });
-
+      console.log(`[Importer] Created SVG: ${shapeAsset.name}`);
       return 1;
     } catch (error) {
       console.error(`[Importer] Failed to process SVG ${file.name}:`, error);
@@ -351,7 +284,7 @@ export function useFileImporter() {
 
     setState({ isProcessing: false, progress: null, error: null });
 
-  }, [addAsset, updateAsset, addNode, addEdge, addLayer, updateLayer, addGroup, setFrameRange, frameEnd]);
+  }, [addAsset, updateAsset, addNode, addLayer, updateLayer, setFrameRange, frameEnd]);
 
   return {
     importResources,

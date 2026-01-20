@@ -671,3 +671,290 @@ export function translatePathData(pathData: string, offsetX: number, offsetY: nu
 
   return result;
 }
+
+// =============================================================================
+// Hierarchical SVG Structure Parsing
+// =============================================================================
+
+import type { SVGStructure, SVGNode, SVGBounds, SVGNodeStyle } from '../types/assets';
+
+/**
+ * Parse an SVG string into a hierarchical structure that preserves group hierarchy.
+ * This is used for smart splitting later.
+ */
+export function parseSVGStructure(svgString: string): SVGStructure {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(svgString, 'image/svg+xml');
+
+  const parseError = doc.querySelector('parsererror');
+  if (parseError) {
+    throw new Error(`Invalid SVG: ${parseError.textContent}`);
+  }
+
+  const svgElement = doc.querySelector('svg');
+  if (!svgElement) {
+    throw new Error('No SVG element found');
+  }
+
+  // Extract viewBox
+  let viewBox: SVGBounds | undefined;
+  const viewBoxAttr = svgElement.getAttribute('viewBox');
+  if (viewBoxAttr) {
+    const parts = viewBoxAttr.split(/[\s,]+/).map(parseFloat);
+    if (parts.length === 4 && parts.every((n) => !isNaN(n))) {
+      viewBox = { x: parts[0], y: parts[1], width: parts[2], height: parts[3] };
+    }
+  }
+
+  // Extract dimensions
+  let dimensions: { width: number; height: number } | undefined;
+  const widthAttr = svgElement.getAttribute('width');
+  const heightAttr = svgElement.getAttribute('height');
+  if (widthAttr && heightAttr) {
+    const width = parseFloat(widthAttr);
+    const height = parseFloat(heightAttr);
+    if (!isNaN(width) && !isNaN(height)) {
+      dimensions = { width, height };
+    }
+  }
+
+  // Get root style
+  const rootStyle = extractStyle(svgElement);
+
+  let nodeCounter = 0;
+
+  /**
+   * Convert style to SVGNodeStyle format
+   */
+  function toNodeStyle(style: SVGPathStyle): SVGNodeStyle {
+    return {
+      fill: style.fill,
+      fillOpacity: style.fillOpacity,
+      fillRule: style.fillRule,
+      stroke: style.stroke,
+      strokeWidth: style.strokeWidth,
+      strokeOpacity: style.strokeOpacity,
+    };
+  }
+
+  /**
+   * Recursively build node tree
+   */
+  function buildNode(element: Element, parentStyle: SVGPathStyle, depth: number): SVGNode | null {
+    const tagName = element.tagName.toLowerCase();
+    const currentStyle = inheritStyle(extractStyle(element), parentStyle);
+    const transform = element.getAttribute('transform') || undefined;
+    const elementId = element.id || undefined;
+
+    // Handle groups - recurse into children
+    if (tagName === 'g') {
+      const children: SVGNode[] = [];
+      for (const child of element.children) {
+        const childNode = buildNode(child, currentStyle, depth + 1);
+        if (childNode) children.push(childNode);
+      }
+      if (children.length === 0) return null;
+
+      // Combine bounds of all children
+      const childBounds = children.map((c) => c.bounds);
+      const bounds = combineBounds(childBounds);
+
+      return {
+        id: elementId,
+        name: elementId || `Group ${++nodeCounter}`,
+        type: 'group',
+        bounds,
+        children,
+        transform,
+      };
+    }
+
+    // Handle path elements
+    if (tagName === 'path') {
+      const d = element.getAttribute('d');
+      if (!d) return null;
+
+      try {
+        const commands = makeAbsolute(parseSVG(d));
+        const bounds = calculatePathBounds(commands);
+        return {
+          id: elementId,
+          name: elementId || `Path ${++nodeCounter}`,
+          type: 'path',
+          bounds,
+          style: toNodeStyle(currentStyle),
+          pathData: d,
+          transform,
+        };
+      } catch {
+        return null;
+      }
+    }
+
+    // Handle rect elements
+    if (tagName === 'rect') {
+      const x = parseFloat(element.getAttribute('x') || '0');
+      const y = parseFloat(element.getAttribute('y') || '0');
+      const width = parseFloat(element.getAttribute('width') || '0');
+      const height = parseFloat(element.getAttribute('height') || '0');
+      const rx = parseFloat(element.getAttribute('rx') || '0');
+      const ry = parseFloat(element.getAttribute('ry') || rx.toString());
+
+      if (width <= 0 || height <= 0) return null;
+
+      let d: string;
+      if (rx > 0 || ry > 0) {
+        const r = Math.min(rx, width / 2);
+        const r2 = Math.min(ry, height / 2);
+        d = `M${x + r},${y} h${width - 2 * r} a${r},${r2} 0 0 1 ${r},${r2} v${height - 2 * r2} a${r},${r2} 0 0 1 -${r},${r2} h-${width - 2 * r} a${r},${r2} 0 0 1 -${r},-${r2} v-${height - 2 * r2} a${r},${r2} 0 0 1 ${r},-${r2} z`;
+      } else {
+        d = `M${x},${y} h${width} v${height} h-${width} z`;
+      }
+
+      return {
+        id: elementId,
+        name: elementId || `Rect ${++nodeCounter}`,
+        type: 'rect',
+        bounds: { x, y, width, height },
+        style: toNodeStyle(currentStyle),
+        pathData: d,
+        transform,
+      };
+    }
+
+    // Handle circle elements
+    if (tagName === 'circle') {
+      const cx = parseFloat(element.getAttribute('cx') || '0');
+      const cy = parseFloat(element.getAttribute('cy') || '0');
+      const r = parseFloat(element.getAttribute('r') || '0');
+
+      if (r <= 0) return null;
+
+      const d = `M${cx - r},${cy} a${r},${r} 0 1 0 ${2 * r},0 a${r},${r} 0 1 0 -${2 * r},0`;
+      return {
+        id: elementId,
+        name: elementId || `Circle ${++nodeCounter}`,
+        type: 'circle',
+        bounds: { x: cx - r, y: cy - r, width: 2 * r, height: 2 * r },
+        style: toNodeStyle(currentStyle),
+        pathData: d,
+        transform,
+      };
+    }
+
+    // Handle ellipse elements
+    if (tagName === 'ellipse') {
+      const cx = parseFloat(element.getAttribute('cx') || '0');
+      const cy = parseFloat(element.getAttribute('cy') || '0');
+      const rx = parseFloat(element.getAttribute('rx') || '0');
+      const ry = parseFloat(element.getAttribute('ry') || '0');
+
+      if (rx <= 0 || ry <= 0) return null;
+
+      const d = `M${cx - rx},${cy} a${rx},${ry} 0 1 0 ${2 * rx},0 a${rx},${ry} 0 1 0 -${2 * rx},0`;
+      return {
+        id: elementId,
+        name: elementId || `Ellipse ${++nodeCounter}`,
+        type: 'ellipse',
+        bounds: { x: cx - rx, y: cy - ry, width: 2 * rx, height: 2 * ry },
+        style: toNodeStyle(currentStyle),
+        pathData: d,
+        transform,
+      };
+    }
+
+    // Handle line elements
+    if (tagName === 'line') {
+      const x1 = parseFloat(element.getAttribute('x1') || '0');
+      const y1 = parseFloat(element.getAttribute('y1') || '0');
+      const x2 = parseFloat(element.getAttribute('x2') || '0');
+      const y2 = parseFloat(element.getAttribute('y2') || '0');
+
+      const d = `M${x1},${y1} L${x2},${y2}`;
+      return {
+        id: elementId,
+        name: elementId || `Line ${++nodeCounter}`,
+        type: 'line',
+        bounds: {
+          x: Math.min(x1, x2),
+          y: Math.min(y1, y2),
+          width: Math.abs(x2 - x1) || 1,
+          height: Math.abs(y2 - y1) || 1,
+        },
+        style: toNodeStyle(currentStyle),
+        pathData: d,
+        transform,
+      };
+    }
+
+    // Handle polygon and polyline elements
+    if (tagName === 'polygon' || tagName === 'polyline') {
+      const points = element.getAttribute('points');
+      if (!points) return null;
+
+      const coords = points.trim().split(/[\s,]+/).map(parseFloat);
+      if (coords.length < 4 || !coords.every((n) => !isNaN(n))) return null;
+
+      let d = `M${coords[0]},${coords[1]}`;
+      for (let i = 2; i < coords.length; i += 2) {
+        d += ` L${coords[i]},${coords[i + 1]}`;
+      }
+      if (tagName === 'polygon') d += ' Z';
+
+      const commands = makeAbsolute(parseSVG(d));
+      const bounds = calculatePathBounds(commands);
+
+      return {
+        id: elementId,
+        name: elementId || `${tagName === 'polygon' ? 'Polygon' : 'Polyline'} ${++nodeCounter}`,
+        type: tagName as 'polygon' | 'polyline',
+        bounds,
+        style: toNodeStyle(currentStyle),
+        pathData: d,
+        transform,
+      };
+    }
+
+    // Skip unhandled elements but process their children (e.g., <defs>, <use>, etc.)
+    const children: SVGNode[] = [];
+    for (const child of element.children) {
+      const childNode = buildNode(child, currentStyle, depth + 1);
+      if (childNode) children.push(childNode);
+    }
+
+    // If we found children, return as implicit group
+    if (children.length > 0) {
+      const childBounds = children.map((c) => c.bounds);
+      const bounds = combineBounds(childBounds);
+      return {
+        name: `Container ${++nodeCounter}`,
+        type: 'group',
+        bounds,
+        children,
+      };
+    }
+
+    return null;
+  }
+
+  // Build root node from SVG element's children
+  const children: SVGNode[] = [];
+  for (const child of svgElement.children) {
+    const childNode = buildNode(child, rootStyle, 0);
+    if (childNode) children.push(childNode);
+  }
+
+  // Create root node
+  const rootBounds = children.length > 0
+    ? combineBounds(children.map((c) => c.bounds))
+    : viewBox || dimensions ? { x: 0, y: 0, ...(dimensions || { width: 100, height: 100 }) } : { x: 0, y: 0, width: 100, height: 100 };
+
+  const root: SVGNode = {
+    name: 'root',
+    type: 'group',
+    bounds: rootBounds,
+    children: children.length > 0 ? children : undefined,
+  };
+
+  return { viewBox, dimensions, root };
+}

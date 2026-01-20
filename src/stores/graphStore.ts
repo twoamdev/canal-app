@@ -11,13 +11,11 @@ import type { SceneNode, SourceNode, OperationNode, Connection } from '../types/
 import {
   isSourceNode,
   isOperationNode,
-  isGroupNode,
   generateConnectionId,
 } from '../types/scene-graph';
 import { useAssetStore } from './assetStore';
 import { useCompositionStore } from './compositionStore';
 import { useLayerStore } from './layerStore';
-import { useGroupStore } from './groupStore';
 
 // =============================================================================
 // Types
@@ -282,18 +280,6 @@ export const useGraphStore = create<GraphState>()(() => ({
           layerStore.updateLayer(sourceNode.layerId, { effects: newEffects });
         }
       }
-
-      // Source -> Group: add layer to group's memberIds
-      if (isSourceNode(sourceNode) && isGroupNode(targetNode)) {
-        const groupStore = useGroupStore.getState();
-        groupStore.addMember(targetNode.groupId, sourceNode.layerId);
-      }
-
-      // Group -> Group: add group to group's memberIds
-      if (isGroupNode(sourceNode) && isGroupNode(targetNode)) {
-        const groupStore = useGroupStore.getState();
-        groupStore.addMember(targetNode.groupId, sourceNode.groupId);
-      }
     }
   },
 
@@ -319,18 +305,6 @@ export const useGraphStore = create<GraphState>()(() => ({
             );
             layerStore.updateLayer(sourceNode.layerId, { effects: newEffects });
           }
-        }
-
-        // Source -> Group: remove layer from group's memberIds
-        if (isSourceNode(sourceNode) && isGroupNode(targetNode)) {
-          const groupStore = useGroupStore.getState();
-          groupStore.removeMember(targetNode.groupId, sourceNode.layerId);
-        }
-
-        // Group -> Group: remove group from group's memberIds
-        if (isGroupNode(sourceNode) && isGroupNode(targetNode)) {
-          const groupStore = useGroupStore.getState();
-          groupStore.removeMember(targetNode.groupId, sourceNode.groupId);
         }
       }
     }
