@@ -28,7 +28,6 @@ import {
   getAssetDimensions, 
   getAssetFrameCount
 } from '../../types/assets';
-// FIXED: Imported factory functions from the correct utility file
 import { 
   createAssetFromFile, 
   createImageSequenceAsset 
@@ -39,8 +38,7 @@ import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import { 
-  X, GripVertical, CircleDot, Palette, Move, 
+import { CircleDot, Palette, Move, 
   FileVideo, Image, Shapes, Layers, SquareDashed, Loader2 
 } from 'lucide-react';
 
@@ -53,7 +51,12 @@ interface SourceNodeEditorProps {
 }
 
 function SourceNodeEditor({ node }: SourceNodeEditorProps) {
-  const assets = useAssetStore((s) => s.assets);
+  // Optimization: Select only the specific asset needed, not the whole store
+  const asset = useAssetStore((s) => {
+    const layer = useLayerStore.getState().layers[node.layerId];
+    return layer ? s.assets[layer.assetId] : null;
+  });
+
   const layer = useLayerStore((s) => s.layers[node.layerId]);
   const updateLayer = useLayerStore((s) => s.updateLayer);
 
@@ -66,7 +69,6 @@ function SourceNodeEditor({ node }: SourceNodeEditorProps) {
     );
   }
 
-  const asset = assets[layer.assetId];
   const dimensions = asset ? getAssetDimensions(asset) : { width: 0, height: 0 };
 
   // Get icon based on asset type
@@ -348,7 +350,6 @@ function EmptyNodeEditor({ node }: EmptyNodeEditorProps) {
     addLayer(newLayer);
 
     // 3. Mutate Node (Empty -> Source)
-    // We use updateNode to change the type property and add the layerId property.
     updateNode(node.id, {
       type: 'source',
       layerId: newLayer.id,
@@ -711,21 +712,30 @@ function OperationNodeEditor({ node }: OperationNodeEditorProps) {
 export function PropertiesPanel() {
   const isOpen = usePanelStore((s) => s.isPropertiesPanelOpen);
   const width = usePanelStore((s) => s.propertiesPanelWidth);
-  const closePanel = usePanelStore((s) => s.closePropertiesPanel);
   const setWidth = usePanelStore((s) => s.setPropertiesPanelWidth);
 
-  // Subscribe to composition and assets to get nodes
+  // Subscribe to composition ID
   const activeCompId = useCompositionStore((s) => s.activeCompositionId);
-  const assets = useAssetStore((s) => s.assets);
 
-  // Get selected node from the composition's graph
-  const selectedNode = (() => {
+  // OPTIMIZATION 1: Get the ID of the selected node (primitive value)
+  // This selector only triggers a re-render if the SELECTION changes,
+  // not if other properties of the graph change.
+  const selectedNodeId = useAssetStore((s) => {
     if (!activeCompId) return null;
-    const comp = assets[activeCompId];
+    const comp = s.assets[activeCompId];
     if (!comp || comp.type !== 'composition') return null;
-    const nodes = Object.values(comp.graph.nodes);
-    return nodes.find((n) => n.selected) ?? null;
-  })();
+    return Object.values(comp.graph.nodes).find((n) => n.selected)?.id ?? null;
+  });
+
+  // OPTIMIZATION 2: Get the specific node object using the ID
+  // This will re-render if the selected node's properties change (which we want for sliders),
+  // but it ignores changes to all other nodes in the graph.
+  const selectedNode = useAssetStore((s) => {
+    if (!activeCompId || !selectedNodeId) return null;
+    const comp = s.assets[activeCompId];
+    if (!comp || comp.type !== 'composition') return null;
+    return comp.graph.nodes[selectedNodeId] ?? null;
+  });
 
   // Resize state
   const [isResizing, setIsResizing] = useState(false);
@@ -784,8 +794,8 @@ export function PropertiesPanel() {
     <div
       ref={panelRef}
       className={cn(
-        'fixed top-0 right-0 h-full bg-background border-l border-border z-50',
-        'flex flex-col shadow-xl',
+        'fixed top-0 right-0 h-full bg-[#1e1e1e] border-border z-50',
+        'flex flex-col',
         isResizing && 'select-none'
       )}
       style={{ width }}
@@ -799,21 +809,13 @@ export function PropertiesPanel() {
         )}
         onMouseDown={handleResizeStart}
       >
-        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-8 flex items-center justify-center">
-          <GripVertical className="w-3 h-3 text-muted-foreground" />
-        </div>
+      
       </div>
 
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <h2 className="font-semibold text-sm">Properties</h2>
-        <button
-          onClick={closePanel}
-          className="p-1 rounded hover:bg-muted transition-colors"
-          title="Close panel (Cmd/Ctrl + \)"
-        >
-          <X className="w-4 h-4" />
-        </button>
+      <div className="flex-row items-center justify-between mx-5 mt-4 space-y-3">
+        <h2 className="font-medium text-zinc-300 text-xs">Properties</h2>
+        <div className='h-[1px] w-full bg-zinc-700'></div>
       </div>
 
       {/* Content */}
@@ -832,8 +834,7 @@ export function PropertiesPanel() {
           </>
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-            <p className="text-sm">No node selected</p>
-            <p className="text-xs mt-1">Select a node to view its properties</p>
+            {/* Empty state content could go here */}
           </div>
         )}
       </div>

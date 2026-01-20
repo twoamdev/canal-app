@@ -289,7 +289,7 @@ export function TimelineScrubber() {
   }, [frameEnd]);
 
   return (
-<div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
+<div className="fixed bottom-2 left-1/2 -translate-x-1/2 z-50">
       {/* Timeline container - fixed width */}
       <div className="w-[600px] h-10 bg-zinc-800  backdrop-blur-sm rounded-md flex items-center shadow-lg border-t border-t-zinc-700 px-1">
         {/* Start frame pill - editable */}
@@ -336,17 +336,17 @@ export function TimelineScrubber() {
           >
             <div
               className="
-      px-2 py-1 min-w-[30px] min-h-[30px] bg-zinc-700 hover:bg-zinc-700 rounded-sm hover:rounded-md flex items-center justify-center border-t border-zinc-500 shadow-md
+      px-2 py-1 min-w-[30px] min-h-[30px] bg-zinc-300 hover:bg-zinc-200 rounded-sm flex items-center justify-center border-t border-zinc-500 shadow-md
       
       /* Animation Classes */
       origin-bottom             
       transition-transform      
-      duration-50              
+      duration-0             
       ease-out                  
-      group-hover:scale-[1.5]   
+      group-hover:scale-[1.0]   
     "
             >
-              <span className="text-xs text-white tabular-nums">
+              <span className="text-xs text-zinc-800 tabular-nums">
                 {currentFrame}
               </span>
             </div>
