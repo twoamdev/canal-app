@@ -13,15 +13,16 @@ import { useGraphStore } from '../../stores/graphStore';
 import { useAssetStore } from '../../stores/assetStore';
 import { useCompositionStore } from '../../stores/compositionStore';
 import { useLayerStore } from '../../stores/layerStore';
-import { 
-  isSourceNode, 
-  isOperationNode, 
+import {
+  isSourceNode,
+  isOperationNode,
   createLayer,
-  type SourceNode, 
-  type OperationNode, 
-  type EmptyNode, 
-  type BlurParams, 
-  type ColorCorrectParams 
+  DEFAULT_TRANSFORM,
+  type SourceNode,
+  type OperationNode,
+  type EmptyNode,
+  type BlurParams,
+  type ColorCorrectParams
 } from '../../types/scene-graph';
 import { 
   isVideoAsset, 
@@ -38,8 +39,8 @@ import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import { CircleDot, Palette, Move, 
-  FileVideo, Image, Shapes, Layers, SquareDashed, Loader2 
+import { CircleDot, Palette, Move,
+  FileVideo, Image, Shapes, Layers, SquareDashed, Loader2, RotateCcw
 } from 'lucide-react';
 
 // =============================================================================
@@ -130,6 +131,24 @@ function SourceNodeEditor({ node }: SourceNodeEditorProps) {
     },
     [layer.id, layer.baseTransform, updateLayer]
   );
+
+  // Check if transform has been modified from default
+  const isTransformModified = (() => {
+    const t = layer.baseTransform;
+    const d = DEFAULT_TRANSFORM;
+    return (
+      t.position.x !== d.position.x ||
+      t.position.y !== d.position.y ||
+      t.scale.x !== d.scale.x ||
+      t.scale.y !== d.scale.y ||
+      t.rotation !== d.rotation
+    );
+  })();
+
+  // Reset transform to default
+  const handleResetTransform = useCallback(() => {
+    updateLayer(layer.id, { baseTransform: { ...DEFAULT_TRANSFORM } });
+  }, [layer.id, updateLayer]);
 
   return (
     <div className="space-y-4">
@@ -226,7 +245,20 @@ function SourceNodeEditor({ node }: SourceNodeEditorProps) {
 
       {/* Transform */}
       <Card className="p-3 space-y-3">
-        <Label className="text-xs font-medium text-muted-foreground">Transform</Label>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs font-medium text-muted-foreground">Transform</Label>
+          {isTransformModified && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleResetTransform}
+              className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <RotateCcw className="w-3 h-3 mr-1" />
+              Reset
+            </Button>
+          )}
+        </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">

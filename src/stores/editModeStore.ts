@@ -7,11 +7,15 @@
 
 import { create } from 'zustand';
 
-interface ViewerBounds {
-  x: number;
-  y: number;
+interface ViewerInfo {
+  /** Offset of viewer from node position (in screen pixels at time of click) */
+  offsetX: number;
+  offsetY: number;
+  /** Viewer dimensions (in screen pixels at time of click) */
   width: number;
   height: number;
+  /** The viewport zoom level when edit mode was entered */
+  initialZoom: number;
 }
 
 interface EditModeState {
@@ -19,13 +23,13 @@ interface EditModeState {
   editingNodeId: string | null;
   /** The layer ID being edited (from the node's data) */
   editingLayerId: string | null;
-  /** The screen bounds of the viewer when edit mode was entered */
-  viewerBounds: ViewerBounds | null;
+  /** Info about the viewer's position relative to the node */
+  viewerInfo: ViewerInfo | null;
   /** Whether edit mode is active */
   isEditMode: boolean;
 
   /** Enter edit mode for a specific node/layer */
-  enterEditMode: (nodeId: string, layerId: string, viewerBounds: ViewerBounds) => void;
+  enterEditMode: (nodeId: string, layerId: string, viewerInfo: ViewerInfo) => void;
   /** Exit edit mode */
   exitEditMode: () => void;
 }
@@ -33,14 +37,14 @@ interface EditModeState {
 export const useEditModeStore = create<EditModeState>((set) => ({
   editingNodeId: null,
   editingLayerId: null,
-  viewerBounds: null,
+  viewerInfo: null,
   isEditMode: false,
 
-  enterEditMode: (nodeId, layerId, viewerBounds) =>
+  enterEditMode: (nodeId, layerId, viewerInfo) =>
     set({
       editingNodeId: nodeId,
       editingLayerId: layerId,
-      viewerBounds,
+      viewerInfo,
       isEditMode: true,
     }),
 
@@ -48,7 +52,7 @@ export const useEditModeStore = create<EditModeState>((set) => ({
     set({
       editingNodeId: null,
       editingLayerId: null,
-      viewerBounds: null,
+      viewerInfo: null,
       isEditMode: false,
     }),
 }));

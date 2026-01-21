@@ -333,16 +333,23 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
     e.stopPropagation(); // Prevent ReactFlow from deselecting
 
     // Get the viewer's screen bounds
-    const rect = e.currentTarget.getBoundingClientRect();
-    const viewerBounds = {
-      x: rect.left,
-      y: rect.top,
-      width: rect.width,
-      height: rect.height,
+    const viewerRect = e.currentTarget.getBoundingClientRect();
+
+    // Find the node element to calculate viewer's offset from node position
+    const nodeElement = e.currentTarget.closest('.react-flow__node');
+    const nodeRect = nodeElement?.getBoundingClientRect();
+
+    const viewerInfo = {
+      // Offset of viewer from node's top-left corner (in current screen pixels)
+      offsetX: nodeRect ? viewerRect.left - nodeRect.left : 0,
+      offsetY: nodeRect ? viewerRect.top - nodeRect.top : 0,
+      width: viewerRect.width,
+      height: viewerRect.height,
+      initialZoom: zoom,
     };
 
-    enterEditMode(id, data.layerId, viewerBounds);
-  }, [selected, id, data.layerId, enterEditMode]);
+    enterEditMode(id, data.layerId, viewerInfo);
+  }, [selected, id, data.layerId, enterEditMode, zoom]);
 
   // Render shape preview SVG (parent handles dimensions and background)
   const renderShapePreview = () => {

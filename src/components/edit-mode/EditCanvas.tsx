@@ -5,13 +5,16 @@
  * using react-moveable handles.
  */
 
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useLayoutEffect, useState, memo } from 'react';
 import Moveable from 'react-moveable';
 import type { Viewport } from '@xyflow/react';
 import type { Layer } from '../../types/scene-graph';
 import type { Transform } from '../../types/scene-graph';
 import { useAssetStore } from '../../stores/assetStore';
 import { AssetPreview } from './AssetPreview';
+
+// Memoized asset preview to prevent re-renders during drag
+const MemoizedAssetPreview = memo(AssetPreview);
 
 interface EditCanvasProps {
   layer: Layer;
@@ -35,7 +38,26 @@ export function EditCanvas({
   onExit,
 }: EditCanvasProps) {
   const targetRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const moveableRef = useRef<any>(null);
   const asset = useAssetStore((s) => s.assets[layer.assetId]);
+
+  // Track if we're currently dragging to avoid store updates during drag
+  const isDraggingRef = useRef(false);
+
+  // Local transform state for smooth dragging (only update store on drag end)
+  const [localTransform, setLocalTransform] = useState<Transform | null>(null);
+
+  // Use local transform during drag, otherwise use layer transform
+  const activeTransform = localTransform ?? layer.baseTransform;
+
+  // Update Moveable handles when viewport changes (pan/zoom)
+  // useLayoutEffect runs synchronously after DOM updates but before paint,
+  // ensuring handles update in the same frame as the content
+  useLayoutEffect(() => {
+    if (isDraggingRef.current) return;
+    moveableRef.current?.updateRect();
+  }, [viewport.x, viewport.y, viewport.zoom]);
 
   // Calculate padding to extend around the viewer
   // This gives room to drag/scale content beyond the layer bounds
@@ -72,18 +94,21 @@ export function EditCanvas({
     e.stopPropagation();
   }, []);
 
+  // Wheel events are handled by the parent EditModeOverlay with a native listener
+
   if (!asset) {
     return null;
   }
 
   // Get current transform values, applying viewport scale for display
-  const displayX = layer.baseTransform.position.x * viewport.zoom;
-  const displayY = layer.baseTransform.position.y * viewport.zoom;
-  const displayScaleX = layer.baseTransform.scale.x;
-  const displayScaleY = layer.baseTransform.scale.y;
-  const displayRotation = layer.baseTransform.rotation;
-  const anchorX = layer.baseTransform.anchorPoint.x;
-  const anchorY = layer.baseTransform.anchorPoint.y;
+  // Use activeTransform (local during drag, layer otherwise)
+  const displayX = activeTransform.position.x * viewport.zoom;
+  const displayY = activeTransform.position.y * viewport.zoom;
+  const displayScaleX = activeTransform.scale.x;
+  const displayScaleY = activeTransform.scale.y;
+  const displayRotation = activeTransform.rotation;
+  const anchorX = activeTransform.anchorPoint.x;
+  const anchorY = activeTransform.anchorPoint.y;
 
   return (
     <div
@@ -140,42 +165,78 @@ export function EditCanvas({
           transformOrigin: `${anchorX * 100}% ${anchorY * 100}%`,
         }}
       >
-        <AssetPreview asset={asset} />
+        <MemoizedAssetPreview asset={asset} />
       </div>
 
       {/* React Moveable */}
       <Moveable
+        ref={moveableRef}
         target={targetRef}
         draggable
         rotatable
         scalable
         keepRatio={false}
-        throttleDrag={0}
-        throttleRotate={0}
-        throttleScale={0}
+        throttleDrag={1}
+        throttleRotate={1}
+        throttleScale={0.01}
         renderDirections={['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se']}
         rotationPosition="top"
+        onDragStart={() => {
+          isDraggingRef.current = true;
+          setLocalTransform(layer.baseTransform);
+        }}
         onDrag={({ beforeTranslate }) => {
           // Convert screen pixels back to asset-relative pixels
           const assetX = beforeTranslate[0] / viewport.zoom;
           const assetY = beforeTranslate[1] / viewport.zoom;
 
-          onTransformChange({
-            ...layer.baseTransform,
+          // Update local state only (no store update during drag)
+          setLocalTransform(prev => prev ? {
+            ...prev,
             position: { x: assetX, y: assetY },
-          });
+          } : null);
+        }}
+        onDragEnd={() => {
+          isDraggingRef.current = false;
+          // Commit final transform to store
+          if (localTransform) {
+            onTransformChange(localTransform);
+          }
+          setLocalTransform(null);
+        }}
+        onRotateStart={() => {
+          isDraggingRef.current = true;
+          setLocalTransform(layer.baseTransform);
         }}
         onRotate={({ beforeRotate }) => {
-          onTransformChange({
-            ...layer.baseTransform,
+          setLocalTransform(prev => prev ? {
+            ...prev,
             rotation: beforeRotate,
-          });
+          } : null);
+        }}
+        onRotateEnd={() => {
+          isDraggingRef.current = false;
+          if (localTransform) {
+            onTransformChange(localTransform);
+          }
+          setLocalTransform(null);
+        }}
+        onScaleStart={() => {
+          isDraggingRef.current = true;
+          setLocalTransform(layer.baseTransform);
         }}
         onScale={({ scale }) => {
-          onTransformChange({
-            ...layer.baseTransform,
+          setLocalTransform(prev => prev ? {
+            ...prev,
             scale: { x: scale[0], y: scale[1] },
-          });
+          } : null);
+        }}
+        onScaleEnd={() => {
+          isDraggingRef.current = false;
+          if (localTransform) {
+            onTransformChange(localTransform);
+          }
+          setLocalTransform(null);
         }}
       />
 
