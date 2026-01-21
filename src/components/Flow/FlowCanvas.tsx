@@ -20,6 +20,7 @@ import { NodeCommandMenu } from './NodeCommandMenu';
 import { SourceNodeComponent, OperationNodeComponent } from '../nodes';
 import { ZoomInvariantEdge, ZoomInvariantConnectionLine, ClickConnectionLine } from '../edges';
 import { EmptyNodeComponent } from '../nodes/EmptyNodeComponent';
+import { EditModeOverlay } from '../edit-mode';
 
 // Component to initialize hotkeys inside ReactFlow context
 function CanvasHotkeys() {
@@ -129,14 +130,7 @@ export function FlowCanvas() {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [activeConnection, cancelConnection]);
 
-    // Double-click on node to zoom and center it
-    const onNodeDoubleClick = useCallback((_event: React.MouseEvent, node: Node) => {
-        fitView({
-            nodes: [{ id: node.id }],
-            duration: 150,
-            padding: 0.2,
-        });
-    }, [fitView]);
+    // Note: Double-click to zoom is now handled by backtick key in useCanvasHotkeys
 
     const onConnect: OnConnect = useCallback(
         (params) => {
@@ -179,7 +173,6 @@ export function FlowCanvas() {
                 onNodesChange={onNodesChange as OnNodesChange}
                 onEdgesChange={onEdgesChange as OnEdgesChange}
                 onConnect={onConnect}
-                onNodeDoubleClick={onNodeDoubleClick}
                 onPaneClick={handlePaneClick}
                 panOnScroll
                 selectionOnDrag
@@ -199,6 +192,8 @@ export function FlowCanvas() {
                 />
                 {/* Click-to-connect connection line */}
                 {activeConnection && <ClickConnectionLine />}
+                {/* Edit mode overlay (renders via portal) */}
+                <EditModeOverlay />
             </ReactFlow>
         </div>
     );

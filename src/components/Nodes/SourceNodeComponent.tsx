@@ -18,6 +18,7 @@ import { useGraphStore } from '../../stores/graphStore';
 import { useLayerStore } from '../../stores/layerStore';
 import { useTimelineStore } from '../../stores/timelineStore';
 import { useConnectionStore } from '../../stores/connectionStore';
+import { useEditModeStore } from '../../stores/editModeStore';
 import { loadAssetFrame, mapGlobalFrameToSource, globalFrameCache } from '../../utils/asset-loader';
 import {
   isVideoAsset,
@@ -322,7 +323,28 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
   // Check if this handle is a valid drop target
   const isValidSourceTarget = activeConnection?.handleType === 'target' && activeConnection?.nodeId !== id;
 
-  // Render shape preview with checkerboard background at full resolution
+  // Edit mode - click on viewer when selected to enter edit mode
+  const enterEditMode = useEditModeStore((s) => s.enterEditMode);
+
+  const handleViewerClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // Only enter edit mode if this node is selected
+    if (!selected) return;
+
+    e.stopPropagation(); // Prevent ReactFlow from deselecting
+
+    // Get the viewer's screen bounds
+    const rect = e.currentTarget.getBoundingClientRect();
+    const viewerBounds = {
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+
+    enterEditMode(id, data.layerId, viewerBounds);
+  }, [selected, id, data.layerId, enterEditMode]);
+
+  // Render shape preview SVG (parent handles dimensions and background)
   const renderShapePreview = () => {
     if (!asset || !isShapeAsset(asset)) return null;
 
@@ -331,72 +353,52 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
     const height = asset.intrinsicHeight;
 
     return (
-      <div
-        className="relative rounded overflow-hidden"
-        style={{
-          width: `${width}px`,
-          height: `${height}px`,
-          backgroundImage: `repeating-conic-gradient(#2a2a2a 0% 25%, #3a3a3a 0% 50%)`,
-          backgroundSize: '16px 16px',
-        }}
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="w-full h-full"
       >
-        <svg
-          viewBox={`0 0 ${width} ${height}`}
-          className="w-full h-full"
-        >
-          {paths && paths.length > 0 ? (
-            // Multi-path SVG: render each path with its own style
-            paths.map((p, i) => (
-              <path
-                key={i}
-                d={p.pathData}
-                fill={p.fillColor ?? 'none'}
-                fillOpacity={p.fillOpacity}
-                fillRule={p.fillRule}
-                stroke={p.strokeColor}
-                strokeWidth={p.strokeWidth}
-                strokeOpacity={p.strokeOpacity}
-                strokeLinecap={p.strokeLinecap}
-                strokeLinejoin={p.strokeLinejoin}
-                strokeMiterlimit={p.strokeMiterlimit}
-                strokeDasharray={p.strokeDasharray?.join(' ')}
-                strokeDashoffset={p.strokeDashoffset}
-              />
-            ))
-          ) : (
-            // Single path fallback
+        {paths && paths.length > 0 ? (
+          // Multi-path SVG: render each path with its own style
+          paths.map((p, i) => (
             <path
-              d={pathData}
-              fill={fillColor ?? '#ffffff'}
-              stroke={strokeColor}
-              strokeWidth={strokeWidth}
-              fillRule={fillRule}
+              key={i}
+              d={p.pathData}
+              fill={p.fillColor ?? 'none'}
+              fillOpacity={p.fillOpacity}
+              fillRule={p.fillRule}
+              stroke={p.strokeColor}
+              strokeWidth={p.strokeWidth}
+              strokeOpacity={p.strokeOpacity}
+              strokeLinecap={p.strokeLinecap}
+              strokeLinejoin={p.strokeLinejoin}
+              strokeMiterlimit={p.strokeMiterlimit}
+              strokeDasharray={p.strokeDasharray?.join(' ')}
+              strokeDashoffset={p.strokeDashoffset}
             />
-          )}
-        </svg>
-      </div>
+          ))
+        ) : (
+          // Single path fallback
+          <path
+            d={pathData}
+            fill={fillColor ?? '#ffffff'}
+            stroke={strokeColor}
+            strokeWidth={strokeWidth}
+            fillRule={fillRule}
+          />
+        )}
+      </svg>
     );
   };
 
-  // Render composition preview with checkerboard background at full resolution
+  // Render composition preview (parent handles dimensions and background)
   const renderCompositionPreview = () => {
     if (!asset || !isCompositionAsset(asset)) return null;
 
     return (
-      <div
-        className="relative rounded overflow-hidden"
-        style={{
-          width: `${dimensions.width}px`,
-          height: `${dimensions.height}px`,
-          backgroundImage: `repeating-conic-gradient(#2a2a2a 0% 25%, #3a3a3a 0% 50%)`,
-          backgroundSize: '16px 16px',
-        }}
-      >
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-center text-muted-foreground">
-            <Layers className="w-8 h-8 mx-auto mb-1 opacity-50" />
-            <span className="text-xs">Composition</span>
-          </div>
+      <div className="w-full h-full flex items-center justify-center">
+        <div className="text-center text-muted-foreground">
+          <Layers className="w-8 h-8 mx-auto mb-1 opacity-50" />
+          <span className="text-xs">Composition</span>
         </div>
       </div>
     );
@@ -451,31 +453,66 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
           </div>
         </div>
 
-        {/* Preview content */}
-        <div className="text-xs text-muted-foreground">
-          {/* Asset processing state */}
-          {assetIsLoading && renderAssetProcessing()}
-
-          {/* Video/Image preview (only when asset is ready) */}
-          {!assetIsLoading && (isVideoAsset(asset) || isImageAsset(asset)) && (
-            <AssetViewer
-              canvasRef={canvasRef}
-              width={dimensions.width}
-              height={dimensions.height}
-              isLoading={initialLoading}
-              error={error}
-            />
+        {/* Preview content - click to enter edit mode when selected */}
+        <div
+          onClick={handleViewerClick}
+          className={cn(
+            'text-xs text-muted-foreground rounded overflow-hidden transition-all relative',
+            selected && 'cursor-pointer ring-2 ring-primary/30 hover:ring-primary/50'
           )}
+          title={selected ? 'Click to edit content' : undefined}
+          style={{
+            width: dimensions.width,
+            height: dimensions.height,
+          }}
+        >
+          {/* Checkerboard background for transparency */}
+          <div
+            className="absolute inset-0"
+            style={{
+              backgroundImage: `repeating-conic-gradient(#2a2a2a 0% 25%, #3a3a3a 0% 50%)`,
+              backgroundSize: '16px 16px',
+            }}
+          />
 
-          {/* Shape preview */}
-          {!assetIsLoading && isShapeAsset(asset) && renderShapePreview()}
+          {/* Transformed content wrapper - applies layer.baseTransform */}
+          <div
+            className="absolute"
+            style={{
+              width: dimensions.width,
+              height: dimensions.height,
+              transform: `
+                translate(${layer.baseTransform.position.x}px, ${layer.baseTransform.position.y}px)
+                scale(${layer.baseTransform.scale.x}, ${layer.baseTransform.scale.y})
+                rotate(${layer.baseTransform.rotation}deg)
+              `,
+              transformOrigin: `${layer.baseTransform.anchorPoint.x * 100}% ${layer.baseTransform.anchorPoint.y * 100}%`,
+            }}
+          >
+            {/* Asset processing state */}
+            {assetIsLoading && renderAssetProcessing()}
 
-          {/* Composition preview */}
-          {!assetIsLoading && isCompositionAsset(asset) && renderCompositionPreview()}
+            {/* Video/Image preview (only when asset is ready) */}
+            {!assetIsLoading && (isVideoAsset(asset) || isImageAsset(asset)) && (
+              <AssetViewer
+                canvasRef={canvasRef}
+                width={dimensions.width}
+                height={dimensions.height}
+                isLoading={initialLoading}
+                error={error}
+              />
+            )}
+
+            {/* Shape preview */}
+            {!assetIsLoading && isShapeAsset(asset) && renderShapePreview()}
+
+            {/* Composition preview */}
+            {!assetIsLoading && isCompositionAsset(asset) && renderCompositionPreview()}
+          </div>
 
           {/* No asset message */}
           {!asset && (
-            <div className="py-4 text-center text-muted-foreground/60 border border-dashed border-muted rounded">
+            <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/60 border border-dashed border-muted rounded">
               Asset not found
             </div>
           )}

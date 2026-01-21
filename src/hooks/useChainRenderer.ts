@@ -205,10 +205,11 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
       return;
     }
 
-    // Create a hash of effect parameters to detect changes
+    // Create a hash of effect parameters and layer transform to detect changes
+    const transformHash = JSON.stringify(sourceLayer.baseTransform);
     const paramsHash = chain.operationNodes
       .map((op) => `${op.id}:${op.isEnabled}:${JSON.stringify(op.params)}`)
-      .join('|');
+      .join('|') + `|transform:${transformHash}`;
 
     // Skip if we already rendered this frame AND effect params haven't changed
     if (lastRenderedFrameRef.current === sourceFrame && lastParamsHashRef.current === paramsHash) {
@@ -226,6 +227,35 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
       const canvas = canvasRef.current;
       if (!canvas) return;
 
+      // Get the layer's base transform for applying position/scale/rotation
+      const transform = sourceLayer.baseTransform;
+
+      // Helper to apply transform and draw bitmap with cropping
+      const drawTransformedBitmap = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+        // Clear with transparency (or draw checkerboard if needed)
+        ctx.clearRect(0, 0, width, height);
+
+        // Save context state
+        ctx.save();
+
+        // Apply transform: translate, then rotate, then scale
+        // Anchor point determines the transform origin
+        const anchorX = transform.anchorPoint.x * width;
+        const anchorY = transform.anchorPoint.y * height;
+
+        // Move to anchor, apply transforms, move back
+        ctx.translate(anchorX + transform.position.x, anchorY + transform.position.y);
+        ctx.rotate((transform.rotation * Math.PI) / 180);
+        ctx.scale(transform.scale.x, transform.scale.y);
+        ctx.translate(-anchorX, -anchorY);
+
+        // Draw the bitmap
+        ctx.drawImage(bitmap, 0, 0, width, height);
+
+        // Restore context state
+        ctx.restore();
+      };
+
       // If no operation nodes in chain, just draw directly at full resolution
       if (chain.operationNodes.length === 0) {
         // Set canvas to full resolution - CSS handles display scaling
@@ -234,7 +264,7 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
 
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          ctx.drawImage(bitmap, 0, 0);
+          drawTransformedBitmap(ctx, bitmap.width, bitmap.height);
         }
         lastRenderedFrameRef.current = sourceFrame;
         lastParamsHashRef.current = paramsHash;
@@ -254,7 +284,7 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
 
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          ctx.drawImage(bitmap, 0, 0);
+          drawTransformedBitmap(ctx, bitmap.width, bitmap.height);
         }
         lastRenderedFrameRef.current = sourceFrame;
         lastParamsHashRef.current = paramsHash;
@@ -278,13 +308,22 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
 
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          ctx.drawImage(bitmap, 0, 0);
+          drawTransformedBitmap(ctx, bitmap.width, bitmap.height);
         }
         lastRenderedFrameRef.current = sourceFrame;
         lastParamsHashRef.current = paramsHash;
         setState((s) => ({ ...s, isLoading: false, error: null, hasUpstream: true, dimensions: assetDimensions }));
         return;
       }
+
+      // Create a transformed bitmap for GPU upload
+      // This applies the layer's baseTransform before GPU effects
+      const transformCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const transformCtx = transformCanvas.getContext('2d');
+      if (transformCtx) {
+        drawTransformedBitmap(transformCtx as unknown as CanvasRenderingContext2D, bitmap.width, bitmap.height);
+      }
+      const transformedBitmap = await createImageBitmap(transformCanvas);
 
       // Resize offscreen canvas
       const offscreen = offscreenCanvasRef.current;
@@ -294,8 +333,9 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
         gpuContext.resize(bitmap.width, bitmap.height);
       }
 
-      // Upload source frame to GPU
-      const sourceTexture = gpuContext.uploadImageBitmap(bitmap);
+      // Upload transformed source frame to GPU
+      const sourceTexture = gpuContext.uploadImageBitmap(transformedBitmap);
+      transformedBitmap.close(); // Clean up the transformed bitmap
 
       // Evaluate the effect pipeline
       const outputTexture = pipeline.evaluate(renderNodes, sourceTexture, sourceFrame);

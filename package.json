@@ -26,6 +26,7 @@
     "mp4box": "^2.3.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-moveable": "^0.56.0",
     "svg-path-parser": "^1.1.0",
     "tailwind-merge": "^3.4.0",
     "tailwindcss": "^4.1.18",

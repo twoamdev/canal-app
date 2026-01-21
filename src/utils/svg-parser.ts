@@ -131,6 +131,24 @@ function isNonVisualElement(tagName: string): boolean {
 }
 
 /**
+ * Extract translate(x, y) values from a transform attribute
+ * Returns { x: 0, y: 0 } if no translate is found
+ */
+function parseTranslate(transform: string | null): { x: number; y: number } {
+  if (!transform) return { x: 0, y: 0 };
+
+  // Match translate(x, y) or translate(x y) or translate(x)
+  const translateMatch = transform.match(/translate\s*\(\s*([^,\s]+)[\s,]*([^)]*)\)/i);
+  if (translateMatch) {
+    const x = parseFloat(translateMatch[1]) || 0;
+    const y = parseFloat(translateMatch[2]) || 0;
+    return { x, y };
+  }
+
+  return { x: 0, y: 0 };
+}
+
+/**
  * Parse a numeric value with optional unit
  */
 function parseNumeric(value: string | null | undefined): number | undefined {
@@ -493,6 +511,11 @@ export function parseSVGString(svgString: string): ParsedSVG {
       return;
     }
 
+    // Parse transform attribute for translate values (applies to all shapes)
+    const elementTransform = parseTranslate(element.getAttribute('transform'));
+    const totalOffsetX = offsetX + elementTransform.x;
+    const totalOffsetY = offsetY + elementTransform.y;
+
     if (element.tagName === 'path') {
       const d = element.getAttribute('d');
       if (d) {
@@ -500,20 +523,20 @@ export function parseSVGString(svgString: string): ParsedSVG {
           const commands = makeAbsolute(parseSVG(d));
           const bounds = calculatePathBounds(commands);
 
-          // Apply offset from <use> element if any
-          const finalPathData = (offsetX !== 0 || offsetY !== 0)
-            ? translatePathData(d, offsetX, offsetY)
+          // Apply total offset (from <use> element and element's own transform)
+          const finalPathData = (totalOffsetX !== 0 || totalOffsetY !== 0)
+            ? translatePathData(d, totalOffsetX, totalOffsetY)
             : d;
           const finalBounds = {
-            x: bounds.x + offsetX,
-            y: bounds.y + offsetY,
+            x: bounds.x + totalOffsetX,
+            y: bounds.y + totalOffsetY,
             width: bounds.width,
             height: bounds.height,
           };
 
           paths.push({
             pathData: finalPathData,
-            commands: (offsetX !== 0 || offsetY !== 0) ? makeAbsolute(parseSVG(finalPathData)) : commands,
+            commands: (totalOffsetX !== 0 || totalOffsetY !== 0) ? makeAbsolute(parseSVG(finalPathData)) : commands,
             style: currentStyle,
             bounds: finalBounds,
           });
@@ -523,10 +546,11 @@ export function parseSVGString(svgString: string): ParsedSVG {
       }
     }
 
-    // Also handle basic shapes by converting to paths
+    // Handle basic shapes by converting to paths
+
     if (element.tagName === 'rect') {
-      const x = parseFloat(element.getAttribute('x') || '0') + offsetX;
-      const y = parseFloat(element.getAttribute('y') || '0') + offsetY;
+      const x = parseFloat(element.getAttribute('x') || '0') + totalOffsetX;
+      const y = parseFloat(element.getAttribute('y') || '0') + totalOffsetY;
       const width = parseFloat(element.getAttribute('width') || '0');
       const height = parseFloat(element.getAttribute('height') || '0');
       const rx = parseFloat(element.getAttribute('rx') || '0');
@@ -554,8 +578,8 @@ export function parseSVGString(svgString: string): ParsedSVG {
     }
 
     if (element.tagName === 'circle') {
-      const cx = parseFloat(element.getAttribute('cx') || '0') + offsetX;
-      const cy = parseFloat(element.getAttribute('cy') || '0') + offsetY;
+      const cx = parseFloat(element.getAttribute('cx') || '0') + totalOffsetX;
+      const cy = parseFloat(element.getAttribute('cy') || '0') + totalOffsetY;
       const r = parseFloat(element.getAttribute('r') || '0');
 
       if (r > 0) {
@@ -572,8 +596,8 @@ export function parseSVGString(svgString: string): ParsedSVG {
     }
 
     if (element.tagName === 'ellipse') {
-      const cx = parseFloat(element.getAttribute('cx') || '0') + offsetX;
-      const cy = parseFloat(element.getAttribute('cy') || '0') + offsetY;
+      const cx = parseFloat(element.getAttribute('cx') || '0') + totalOffsetX;
+      const cy = parseFloat(element.getAttribute('cy') || '0') + totalOffsetY;
       const rx = parseFloat(element.getAttribute('rx') || '0');
       const ry = parseFloat(element.getAttribute('ry') || '0');
 
@@ -590,10 +614,10 @@ export function parseSVGString(svgString: string): ParsedSVG {
     }
 
     if (element.tagName === 'line') {
-      const x1 = parseFloat(element.getAttribute('x1') || '0') + offsetX;
-      const y1 = parseFloat(element.getAttribute('y1') || '0') + offsetY;
-      const x2 = parseFloat(element.getAttribute('x2') || '0') + offsetX;
-      const y2 = parseFloat(element.getAttribute('y2') || '0') + offsetY;
+      const x1 = parseFloat(element.getAttribute('x1') || '0') + totalOffsetX;
+      const y1 = parseFloat(element.getAttribute('y1') || '0') + totalOffsetY;
+      const x2 = parseFloat(element.getAttribute('x2') || '0') + totalOffsetX;
+      const y2 = parseFloat(element.getAttribute('y2') || '0') + totalOffsetY;
 
       const d = `M${x1},${y1} L${x2},${y2}`;
       const commands = makeAbsolute(parseSVG(d));
@@ -616,9 +640,9 @@ export function parseSVGString(svgString: string): ParsedSVG {
         const coords = points.trim().split(/[\s,]+/).map(parseFloat);
         if (coords.length >= 4 && coords.every((n) => !isNaN(n))) {
           // Apply offset to all coordinates
-          let d = `M${coords[0] + offsetX},${coords[1] + offsetY}`;
+          let d = `M${coords[0] + totalOffsetX},${coords[1] + totalOffsetY}`;
           for (let i = 2; i < coords.length; i += 2) {
-            d += ` L${coords[i] + offsetX},${coords[i + 1] + offsetY}`;
+            d += ` L${coords[i] + totalOffsetX},${coords[i + 1] + totalOffsetY}`;
           }
           if (element.tagName === 'polygon') {
             d += ' Z';

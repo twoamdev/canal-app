@@ -1,6 +1,9 @@
 import { useEffect, useCallback } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { useCommandMenuStore } from '../stores/commandMenuStore';
+import { useEditModeStore } from '../stores/editModeStore';
+import { useAssetStore } from '../stores/assetStore';
+import { useCompositionStore } from '../stores/compositionStore';
 
 interface HotkeyAction {
   key: string;
@@ -15,12 +18,54 @@ export function useCanvasHotkeys() {
   const { zoomIn, zoomOut, fitView, setViewport, getViewport } = useReactFlow();
   const openCommandMenu = useCommandMenuStore((state) => state.open);
 
+  // Get helper to find selected node
+  const getSelectedNodeId = useCallback(() => {
+    const activeCompId = useCompositionStore.getState().activeCompositionId;
+    if (!activeCompId) return null;
+
+    const comp = useAssetStore.getState().assets[activeCompId];
+    if (!comp || comp.type !== 'composition') return null;
+
+    const selectedNode = Object.values(comp.graph.nodes).find((n) => n.selected);
+    return selectedNode?.id ?? null;
+  }, []);
+
   // Define all hotkey actions
   const getHotkeys = useCallback((): HotkeyAction[] => [
     {
       key: 'Tab',
       action: () => openCommandMenu(),
       description: 'Open node command menu',
+    },
+    {
+      key: '`', // Backtick key
+      action: () => {
+        // If in edit mode, exit it
+        if (useEditModeStore.getState().isEditMode) {
+          useEditModeStore.getState().exitEditMode();
+          return;
+        }
+        // Otherwise, zoom to selected node
+        const selectedNodeId = getSelectedNodeId();
+        if (selectedNodeId) {
+          fitView({
+            nodes: [{ id: selectedNodeId }],
+            duration: 150,
+            padding: 0.2,
+          });
+        }
+      },
+      description: 'Zoom to selected node / Exit edit mode',
+    },
+    {
+      key: 'Escape',
+      action: () => {
+        // Exit edit mode if active
+        if (useEditModeStore.getState().isEditMode) {
+          useEditModeStore.getState().exitEditMode();
+        }
+      },
+      description: 'Exit edit mode',
     },
     {
       key: '=', // + key (without shift)
@@ -54,7 +99,7 @@ export function useCanvasHotkeys() {
       description: 'Reset zoom to 100%',
     },
     // Add more hotkeys here as needed
-  ], [zoomIn, zoomOut, fitView, setViewport, getViewport, openCommandMenu]);
+  ], [zoomIn, zoomOut, fitView, setViewport, getViewport, openCommandMenu, getSelectedNodeId]);
 
   useEffect(() => {
     const hotkeys = getHotkeys();
