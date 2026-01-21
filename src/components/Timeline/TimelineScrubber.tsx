@@ -289,7 +289,7 @@ export function TimelineScrubber() {
   }, [frameEnd]);
 
   return (
-<div className="fixed bottom-2 left-1/2 -translate-x-1/2 z-50">
+<div className="fixed bottom-2 left-1/2 -translate-x-1/2 z-[60]">
       {/* Timeline container - fixed width */}
       <div className="w-[600px] h-10 bg-zinc-800  backdrop-blur-sm rounded-md flex items-center shadow-lg border-t border-t-zinc-700 px-1">
         {/* Start frame pill - editable */}

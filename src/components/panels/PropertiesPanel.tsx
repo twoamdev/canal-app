@@ -826,7 +826,7 @@ export function PropertiesPanel() {
     <div
       ref={panelRef}
       className={cn(
-        'fixed top-0 right-0 h-full bg-[#1e1e1e] border-border z-50',
+        'fixed top-0 right-0 h-full bg-[#1e1e1e] border-border z-[60]',
         'flex flex-col',
         isResizing && 'select-none'
       )}

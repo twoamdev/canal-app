@@ -40,12 +40,10 @@ export function useCanvasHotkeys() {
     {
       key: '`', // Backtick key
       action: () => {
-        // If in edit mode, exit it
+        // Only zoom to selected node when NOT in edit mode
         if (useEditModeStore.getState().isEditMode) {
-          useEditModeStore.getState().exitEditMode();
           return;
         }
-        // Otherwise, zoom to selected node
         const selectedNodeId = getSelectedNodeId();
         if (selectedNodeId) {
           fitView({
@@ -55,7 +53,7 @@ export function useCanvasHotkeys() {
           });
         }
       },
-      description: 'Zoom to selected node / Exit edit mode',
+      description: 'Zoom to selected node',
     },
     {
       key: 'Escape',

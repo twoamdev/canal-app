@@ -113,7 +113,7 @@ export function EditCanvas({
   return (
     <div
       onClick={handleCanvasClick}
-      className="absolute bg-neutral-900/90 rounded-lg border border-white/10 overflow-hidden"
+      className="absolute bg-transparent overflow-hidden"
       style={{
         left: canvasLeft,
         top: canvasTop,
@@ -123,7 +123,7 @@ export function EditCanvas({
     >
       {/* Checkerboard background pattern */}
       <div
-        className="absolute inset-0 opacity-20"
+        className="absolute inset-0 opacity-0 pointer-events-none"
         style={{
           backgroundImage: `
             repeating-conic-gradient(
@@ -240,11 +240,6 @@ export function EditCanvas({
         }}
       />
 
-      {/* Instructions */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-white/50 bg-black/50 px-3 py-1.5 rounded">
-        Drag to move | Corner handles to scale | Top handle to rotate | Click
-        outside or press Backtick/Escape to exit
-      </div>
     </div>
   );
 }
