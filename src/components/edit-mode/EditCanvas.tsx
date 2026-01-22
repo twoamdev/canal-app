@@ -47,17 +47,31 @@ export function EditCanvas({
 
   // Local transform state for smooth dragging (only update store on drag end)
   const [localTransform, setLocalTransform] = useState<Transform | null>(null);
+  // Ref to track latest transform value (avoids stale closure in event handlers)
+  const localTransformRef = useRef<Transform | null>(null);
+  // Ref to store the transform at drag/rotate/scale START (for computing deltas)
+  const startTransformRef = useRef<Transform | null>(null);
 
   // Use local transform during drag, otherwise use layer transform
   const activeTransform = localTransform ?? layer.baseTransform;
 
-  // Update Moveable handles when viewport changes (pan/zoom)
+  // Update Moveable handles when viewport changes (pan/zoom) or when transform resets
   // useLayoutEffect runs synchronously after DOM updates but before paint,
   // ensuring handles update in the same frame as the content
   useLayoutEffect(() => {
     if (isDraggingRef.current) return;
     moveableRef.current?.updateRect();
-  }, [viewport.x, viewport.y, viewport.zoom]);
+  }, [
+    viewport.x,
+    viewport.y,
+    viewport.zoom,
+    // Also update handles when layer transform changes (e.g., reset button)
+    layer.baseTransform.position.x,
+    layer.baseTransform.position.y,
+    layer.baseTransform.scale.x,
+    layer.baseTransform.scale.y,
+    layer.baseTransform.rotation,
+  ]);
 
   // Calculate padding to extend around the viewer
   // This gives room to drag/scale content beyond the layer bounds
@@ -183,59 +197,92 @@ export function EditCanvas({
         rotationPosition="top"
         onDragStart={() => {
           isDraggingRef.current = true;
+          // Store the starting transform to compute deltas from
+          startTransformRef.current = layer.baseTransform;
+          localTransformRef.current = layer.baseTransform;
           setLocalTransform(layer.baseTransform);
         }}
         onDrag={({ beforeTranslate }) => {
-          // Convert screen pixels back to asset-relative pixels
-          const assetX = beforeTranslate[0] / viewport.zoom;
-          const assetY = beforeTranslate[1] / viewport.zoom;
+          if (!startTransformRef.current) return;
 
-          // Update local state only (no store update during drag)
-          setLocalTransform(prev => prev ? {
-            ...prev,
-            position: { x: assetX, y: assetY },
-          } : null);
+          // beforeTranslate is a DELTA from drag start, so add it to the original position
+          const deltaX = beforeTranslate[0] / viewport.zoom;
+          const deltaY = beforeTranslate[1] / viewport.zoom;
+
+          const updated = {
+            ...startTransformRef.current,
+            position: {
+              x: startTransformRef.current.position.x + deltaX,
+              y: startTransformRef.current.position.y + deltaY,
+            },
+          };
+          localTransformRef.current = updated;
+          setLocalTransform(updated);
         }}
         onDragEnd={() => {
           isDraggingRef.current = false;
-          // Commit final transform to store
-          if (localTransform) {
-            onTransformChange(localTransform);
+          // Commit final transform to store (use ref to avoid stale closure)
+          if (localTransformRef.current) {
+            onTransformChange(localTransformRef.current);
           }
+          startTransformRef.current = null;
+          localTransformRef.current = null;
           setLocalTransform(null);
         }}
         onRotateStart={() => {
           isDraggingRef.current = true;
+          startTransformRef.current = layer.baseTransform;
+          localTransformRef.current = layer.baseTransform;
           setLocalTransform(layer.baseTransform);
         }}
         onRotate={({ beforeRotate }) => {
-          setLocalTransform(prev => prev ? {
-            ...prev,
+          if (!startTransformRef.current) return;
+
+          // beforeRotate is an absolute rotation value
+          const updated = {
+            ...startTransformRef.current,
             rotation: beforeRotate,
-          } : null);
+          };
+          localTransformRef.current = updated;
+          setLocalTransform(updated);
         }}
         onRotateEnd={() => {
           isDraggingRef.current = false;
-          if (localTransform) {
-            onTransformChange(localTransform);
+          if (localTransformRef.current) {
+            onTransformChange(localTransformRef.current);
           }
+          startTransformRef.current = null;
+          localTransformRef.current = null;
           setLocalTransform(null);
         }}
         onScaleStart={() => {
           isDraggingRef.current = true;
+          startTransformRef.current = layer.baseTransform;
+          localTransformRef.current = layer.baseTransform;
           setLocalTransform(layer.baseTransform);
         }}
         onScale={({ scale }) => {
-          setLocalTransform(prev => prev ? {
-            ...prev,
-            scale: { x: scale[0], y: scale[1] },
-          } : null);
+          if (!startTransformRef.current) return;
+
+          // Moveable's scale is relative to visual size at drag start,
+          // so multiply by our starting scale to get the absolute scale
+          const newScaleX = startTransformRef.current.scale.x * scale[0];
+          const newScaleY = startTransformRef.current.scale.y * scale[1];
+
+          const updated = {
+            ...startTransformRef.current,
+            scale: { x: newScaleX, y: newScaleY },
+          };
+          localTransformRef.current = updated;
+          setLocalTransform(updated);
         }}
         onScaleEnd={() => {
           isDraggingRef.current = false;
-          if (localTransform) {
-            onTransformChange(localTransform);
+          if (localTransformRef.current) {
+            onTransformChange(localTransformRef.current);
           }
+          startTransformRef.current = null;
+          localTransformRef.current = null;
           setLocalTransform(null);
         }}
       />
