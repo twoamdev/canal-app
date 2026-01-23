@@ -7,10 +7,16 @@
 
 import { useCallback, useRef, useEffect } from 'react';
 import { Handle, Position, useViewport, useUpdateNodeInternals, useReactFlow } from '@xyflow/react';
-import type { OperationNode, OperationType } from '../../types/scene-graph';
+import type { OperationNode, OperationType, TransformParams } from '../../types/scene-graph';
 import { useGraphStore } from '../../stores/graphStore';
 import { useConnectionStore } from '../../stores/connectionStore';
+import { useEditModeStore } from '../../stores/editModeStore';
+import { useLayerStore } from '../../stores/layerStore';
+import { useAssetStore } from '../../stores/assetStore';
+import { useCompositionStore } from '../../stores/compositionStore';
 import { useChainRenderer } from '../../hooks/useChainRenderer';
+import { findUpstreamChain, type SceneGraph } from '../../utils/scene-graph-utils';
+import { calculateAccumulatedBounds } from '../../utils/transform-utils';
 import { Card } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
@@ -67,6 +73,15 @@ export function OperationNodeComponent(props: OperationNodeComponentProps) {
   const activeConnection = useConnectionStore((s) => s.activeConnection);
   const startConnection = useConnectionStore((s) => s.startConnection);
   const cancelConnection = useConnectionStore((s) => s.cancelConnection);
+  const enterTransformEditMode = useEditModeStore((s) => s.enterTransformEditMode);
+  const layers = useLayerStore((s) => s.layers);
+  const assets = useAssetStore((s) => s.assets);
+  const activeCompId = useCompositionStore((s) => s.activeCompositionId);
+  const composition = useAssetStore((s) => {
+    if (!activeCompId) return null;
+    const asset = s.assets[activeCompId];
+    return asset?.type === 'composition' ? asset : null;
+  });
 
   // ReactFlow
   const { zoom } = useViewport();
@@ -172,6 +187,83 @@ export function OperationNodeComponent(props: OperationNodeComponentProps) {
   const isValidSourceTarget = activeConnection?.handleType === 'target' && activeConnection?.nodeId !== id;
   const isValidTargetTarget = activeConnection?.handleType === 'source' && activeConnection?.nodeId !== id;
 
+  // Handle click on viewer for transform nodes - enters edit mode
+  const handleViewerClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // Only handle for selected transform nodes
+    if (!selected || operationType !== 'transform') return;
+    if (!composition?.graph || !hasUpstream) return;
+
+    e.stopPropagation();
+
+    const sceneGraph: SceneGraph = {
+      nodes: composition.graph.nodes,
+      edges: composition.graph.edges,
+    };
+
+    // Find the upstream chain to get the source layer
+    const chain = findUpstreamChain(sceneGraph, id);
+    if (!chain.isComplete || !chain.sourceNode) return;
+
+    // Get the source layer and asset
+    const sourceLayer = layers[chain.sourceNode.layerId];
+    if (!sourceLayer) return;
+
+    const sourceAsset = assets[sourceLayer.assetId];
+    if (!sourceAsset) return;
+
+    // Layer dimensions (original size for dashed outline)
+    const layerDimensions = {
+      width: sourceAsset.intrinsicWidth,
+      height: sourceAsset.intrinsicHeight,
+    };
+
+    // Collect all transform params from operations BEFORE this node in the chain
+    const upstreamTransformParams: TransformParams[] = [];
+    for (const op of chain.operationNodes) {
+      if (op.id === id) break; // Stop at current node
+      if (op.operationType === 'transform' && op.isEnabled) {
+        upstreamTransformParams.push(op.params as TransformParams);
+      }
+    }
+
+    // Calculate accumulated bounds from baseTransform + upstream transforms
+    // This tells us the bounding box of the content as it arrives at this transform node
+    const contentBounds = calculateAccumulatedBounds(
+      sourceAsset.intrinsicWidth,
+      sourceAsset.intrinsicHeight,
+      sourceLayer.baseTransform,
+      upstreamTransformParams
+    );
+
+    // Get the viewer's screen bounds (same approach as SourceNodeComponent)
+    const viewerRect = e.currentTarget.getBoundingClientRect();
+
+    // Find the node element to calculate viewer's offset from node position
+    const nodeElement = e.currentTarget.closest('.react-flow__node');
+    const nodeRect = nodeElement?.getBoundingClientRect();
+
+    const viewerInfo = {
+      // Offset of viewer from node's top-left corner (in current screen pixels)
+      offsetX: nodeRect ? viewerRect.left - nodeRect.left : 0,
+      offsetY: nodeRect ? viewerRect.top - nodeRect.top : 0,
+      width: viewerRect.width,
+      height: viewerRect.height,
+      initialZoom: zoom,
+    };
+
+    enterTransformEditMode(id, id, viewerInfo, contentBounds, layerDimensions);
+  }, [
+    selected,
+    operationType,
+    composition,
+    hasUpstream,
+    id,
+    layers,
+    assets,
+    zoom,
+    enterTransformEditMode,
+  ]);
+
   return (
     <Card
       className={cn(
@@ -220,15 +312,22 @@ export function OperationNodeComponent(props: OperationNodeComponentProps) {
         </div>
 
         {/* Preview canvas with effect chain applied */}
-        <AssetViewer
-          canvasRef={canvasRef}
-          width={dimensions.width}
-          height={dimensions.height}
-          isLoading={isLoading && hasUpstream}
-          error={error}
-          isEmpty={!hasUpstream}
-          emptyMessage="No input connected"
-        />
+        <div
+          onClick={handleViewerClick}
+          className={cn(
+            operationType === 'transform' && selected && hasUpstream && 'cursor-pointer'
+          )}
+        >
+          <AssetViewer
+            canvasRef={canvasRef}
+            width={dimensions.width}
+            height={dimensions.height}
+            isLoading={isLoading && hasUpstream}
+            error={error}
+            isEmpty={!hasUpstream}
+            emptyMessage="No input connected"
+          />
+        </div>
       </div>
 
       {/* Output handle on bottom */}

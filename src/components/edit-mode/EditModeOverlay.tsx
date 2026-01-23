@@ -11,18 +11,40 @@ import { createPortal } from 'react-dom';
 import { useReactFlow, useOnViewportChange, type Viewport } from '@xyflow/react';
 import { useEditModeStore } from '../../stores/editModeStore';
 import { useLayerStore } from '../../stores/layerStore';
+import { useGraphStore } from '../../stores/graphStore';
+import { isOperationNode } from '../../types/scene-graph';
+import type { OperationNode, TransformParams } from '../../types/scene-graph';
 import { EditCanvas } from './EditCanvas';
+import { TransformEditCanvas } from './TransformEditCanvas';
 
 // Zoom sensitivity factor
 const ZOOM_SENSITIVITY = 0.01;
 const PAN_SENSITIVITY = 1;
 
 export function EditModeOverlay() {
-  const { isEditMode, editingNodeId, editingLayerId, viewerInfo, exitEditMode } = useEditModeStore();
+  const {
+    isEditMode,
+    editingNodeId,
+    editingLayerId,
+    editingOperationNodeId,
+    viewerInfo,
+    contentBounds,
+    layerDimensions,
+    exitEditMode,
+  } = useEditModeStore();
   const layer = useLayerStore((s) => (editingLayerId ? s.layers[editingLayerId] : null));
   const updateLayer = useLayerStore((s) => s.updateLayer);
+  const updateNode = useGraphStore((s) => s.updateNode);
+  const sceneGraph = useGraphStore((s) => s.getSceneGraph());
   const { getNode, getViewport, setViewport } = useReactFlow();
   const overlayRef = useRef<HTMLDivElement>(null);
+
+  // Get the operation node being edited (if in transform edit mode)
+  const operationNode = editingOperationNodeId && sceneGraph
+    ? (isOperationNode(sceneGraph.nodes[editingOperationNodeId])
+        ? sceneGraph.nodes[editingOperationNodeId] as OperationNode
+        : null)
+    : null;
 
   // Track viewport changes in real-time (fires during animations)
   const [viewport, setViewportState] = useState<Viewport>(() => getViewport());
@@ -78,8 +100,12 @@ export function EditModeOverlay() {
     };
   }, [isEditMode, getViewport, setViewport]);
 
+  // Determine which edit mode we're in
+  const isSourceEditMode = editingLayerId && layer;
+  const isTransformEditMode = editingOperationNodeId && operationNode && layerDimensions;
+
   // Don't render if not in edit mode or missing required data
-  if (!isEditMode || !editingNodeId || !editingLayerId || !layer || !viewerInfo) {
+  if (!isEditMode || !editingNodeId || !viewerInfo || (!isSourceEditMode && !isTransformEditMode)) {
     return null;
   }
 
@@ -103,6 +129,13 @@ export function EditModeOverlay() {
   const viewerScreenX = nodeScreenX + scaledOffsetX;
   const viewerScreenY = nodeScreenY + scaledOffsetY;
 
+  // Callback to handle transform param changes for operation nodes
+  const handleTransformParamsChange = (params: TransformParams) => {
+    if (editingOperationNodeId) {
+      updateNode(editingOperationNodeId, { params });
+    }
+  };
+
   return createPortal(
     <div ref={overlayRef} className="fixed inset-0 z-50">
       {/* Backdrop - dims the rest of the canvas */}
@@ -111,19 +144,37 @@ export function EditModeOverlay() {
         onClick={exitEditMode}
       />
 
-      {/* Edit Canvas - expanded area around the viewer */}
-      <EditCanvas
-        layer={layer}
-        viewerScreenX={viewerScreenX}
-        viewerScreenY={viewerScreenY}
-        viewerScreenWidth={scaledWidth}
-        viewerScreenHeight={scaledHeight}
-        viewport={viewport}
-        onTransformChange={(transform) => {
-          updateLayer(layer.id, { baseTransform: transform });
-        }}
-        onExit={exitEditMode}
-      />
+      {/* Edit Canvas - for source node editing (layer.baseTransform) */}
+      {isSourceEditMode && layer && (
+        <EditCanvas
+          layer={layer}
+          viewerScreenX={viewerScreenX}
+          viewerScreenY={viewerScreenY}
+          viewerScreenWidth={scaledWidth}
+          viewerScreenHeight={scaledHeight}
+          viewport={viewport}
+          onTransformChange={(transform) => {
+            updateLayer(layer.id, { baseTransform: transform });
+          }}
+          onExit={exitEditMode}
+        />
+      )}
+
+      {/* Transform Edit Canvas - for transform operation node editing */}
+      {isTransformEditMode && operationNode && layerDimensions && contentBounds && (
+        <TransformEditCanvas
+          operationNode={operationNode}
+          layerDimensions={layerDimensions}
+          contentBounds={contentBounds}
+          viewerScreenX={viewerScreenX}
+          viewerScreenY={viewerScreenY}
+          viewerScreenWidth={scaledWidth}
+          viewerScreenHeight={scaledHeight}
+          viewport={viewport}
+          onTransformChange={handleTransformParamsChange}
+          onExit={exitEditMode}
+        />
+      )}
     </div>,
     document.body
   );

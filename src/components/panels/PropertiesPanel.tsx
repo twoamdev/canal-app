@@ -18,11 +18,13 @@ import {
   isOperationNode,
   createLayer,
   DEFAULT_TRANSFORM,
+  DEFAULT_OPERATION_PARAMS,
   type SourceNode,
   type OperationNode,
   type EmptyNode,
   type BlurParams,
-  type ColorCorrectParams
+  type ColorCorrectParams,
+  type TransformParams
 } from '../../types/scene-graph';
 import { 
   isVideoAsset, 
@@ -682,12 +684,152 @@ function OperationNodeEditor({ node }: OperationNodeEditorProps) {
     );
   };
 
+  // Update a nested transform parameter (e.g., position.x, scale.y)
+  const updateNestedParam = useCallback(
+    (group: string, prop: string, value: number) => {
+      updateNode(node.id, (n) => {
+        if (n.type !== 'operation') return {};
+        const currentParams = n.params as TransformParams;
+        const currentGroup = currentParams[group as keyof TransformParams];
+        if (typeof currentGroup === 'object') {
+          return {
+            params: {
+              ...currentParams,
+              [group]: {
+                ...currentGroup,
+                [prop]: value,
+              },
+            },
+          };
+        }
+        return {};
+      });
+    },
+    [node.id, updateNode]
+  );
+
+  // Check if transform has been modified from default
+  const isTransformModified = useCallback(() => {
+    const params = node.params as TransformParams;
+    const defaults = DEFAULT_OPERATION_PARAMS.transform as TransformParams;
+    return (
+      params.position?.x !== defaults.position.x ||
+      params.position?.y !== defaults.position.y ||
+      params.scale?.x !== defaults.scale.x ||
+      params.scale?.y !== defaults.scale.y ||
+      params.rotation !== defaults.rotation
+    );
+  }, [node.params]);
+
+  // Reset transform to default
+  const handleResetTransform = useCallback(() => {
+    updateNode(node.id, {
+      params: { ...DEFAULT_OPERATION_PARAMS.transform },
+    });
+  }, [node.id, updateNode]);
+
   // Render transform controls
   const renderTransformControls = () => {
+    const transformParams = node.params as TransformParams;
+    // Provide defaults if params are not yet initialized
+    const posX = transformParams?.position?.x ?? 0;
+    const posY = transformParams?.position?.y ?? 0;
+    const scaleX = transformParams?.scale?.x ?? 1;
+    const scaleY = transformParams?.scale?.y ?? 1;
+    const rotation = transformParams?.rotation ?? 0;
+
     return (
-      <Card className="p-3">
-        <div className="py-4 text-center text-muted-foreground/60 border border-dashed border-muted rounded">
-          Transform controls coming soon
+      <Card className="p-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <Label className="text-xs font-medium text-muted-foreground">Transform Settings</Label>
+          {isTransformModified() && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleResetTransform}
+              className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <RotateCcw className="w-3 h-3 mr-1" />
+              Reset
+            </Button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">Position X</Label>
+              <span className="text-xs tabular-nums text-muted-foreground">{posX.toFixed(0)}</span>
+            </div>
+            <Slider
+              value={[posX]}
+              min={-1000}
+              max={1000}
+              step={1}
+              onValueChange={(v) => updateNestedParam('position', 'x', v[0])}
+              disabled={!node.isEnabled}
+            />
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">Position Y</Label>
+              <span className="text-xs tabular-nums text-muted-foreground">{posY.toFixed(0)}</span>
+            </div>
+            <Slider
+              value={[posY]}
+              min={-1000}
+              max={1000}
+              step={1}
+              onValueChange={(v) => updateNestedParam('position', 'y', v[0])}
+              disabled={!node.isEnabled}
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">Scale X</Label>
+              <span className="text-xs tabular-nums text-muted-foreground">{scaleX.toFixed(2)}</span>
+            </div>
+            <Slider
+              value={[scaleX]}
+              min={0}
+              max={4}
+              step={0.01}
+              onValueChange={(v) => updateNestedParam('scale', 'x', v[0])}
+              disabled={!node.isEnabled}
+            />
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">Scale Y</Label>
+              <span className="text-xs tabular-nums text-muted-foreground">{scaleY.toFixed(2)}</span>
+            </div>
+            <Slider
+              value={[scaleY]}
+              min={0}
+              max={4}
+              step={0.01}
+              onValueChange={(v) => updateNestedParam('scale', 'y', v[0])}
+              disabled={!node.isEnabled}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs">Rotation</Label>
+            <span className="text-xs tabular-nums text-muted-foreground">{rotation.toFixed(1)}°</span>
+          </div>
+          <Slider
+            value={[rotation]}
+            min={-180}
+            max={180}
+            step={0.5}
+            onValueChange={(v) => updateParam('rotation', v[0])}
+            disabled={!node.isEnabled}
+          />
         </div>
       </Card>
     );

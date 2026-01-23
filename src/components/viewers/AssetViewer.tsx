@@ -72,8 +72,10 @@ export function AssetViewer({
   className,
 }: AssetViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const initializedRef = useRef(false);
 
-  // Initialize canvas with checkerboard pattern as default background
+  // Initialize canvas with checkerboard pattern ONLY on first mount or when empty
+  // Don't redraw checkerboard on dimension changes - the renderer handles that
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -81,13 +83,15 @@ export function AssetViewer({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Set canvas dimensions
-    canvas.width = width;
-    canvas.height = height;
-
-    // Draw checkerboard as default background
-    drawCheckerboard(ctx, width, height);
-  }, [canvasRef, width, height]);
+    // Only draw checkerboard on initial mount or when explicitly empty
+    // The renderer will handle setting dimensions and drawing content
+    if (!initializedRef.current || isEmpty) {
+      canvas.width = width;
+      canvas.height = height;
+      drawCheckerboard(ctx, width, height);
+      initializedRef.current = true;
+    }
+  }, [canvasRef, width, height, isEmpty]);
 
   return (
     <div

@@ -19,16 +19,96 @@ import { TexturePool } from '../gpu/TexturePool';
 import { RenderPipeline, type RenderNode } from '../gpu/RenderPipeline';
 // Import effects to ensure they are registered
 import '../gpu/effects';
-import type { OperationType } from '../types/scene-graph';
+import type { OperationType, TransformParams, OperationNode } from '../types/scene-graph';
 import type { UniformValue } from '../gpu/types';
 import { DEFAULT_VIEWER_WIDTH, DEFAULT_VIEWER_HEIGHT, drawCheckerboard } from '../components/viewers';
+import { calculateTransformedBounds } from '../utils/transform-utils';
 
-// Map operation types to GPU effect names
+// Map operation types to GPU effect names (transform is handled separately via 2D canvas)
 const OPERATION_TO_EFFECT: Record<OperationType, string> = {
   blur: 'gaussianBlur',
   color_correct: 'colorAdjust',
-  transform: 'transform',
+  transform: 'transform', // Not used for GPU, handled via 2D canvas
 };
+
+/**
+ * Apply a transform operation to a canvas, expanding it to fit the transformed content.
+ * Returns a new OffscreenCanvas with the transformed content.
+ *
+ * The canvas is sized to include both:
+ * - The original source bounds (0,0 to sourceWidth,sourceHeight)
+ * - The transformed content bounds (may extend beyond original in any direction)
+ */
+async function applyTransformOperation(
+  sourceCanvas: OffscreenCanvas | HTMLCanvasElement,
+  transformParams: TransformParams
+): Promise<OffscreenCanvas> {
+  const sourceWidth = sourceCanvas.width;
+  const sourceHeight = sourceCanvas.height;
+
+  // Ensure params have proper defaults
+  const safeParams: TransformParams = {
+    position: transformParams?.position ?? { x: 0, y: 0 },
+    scale: transformParams?.scale ?? { x: 1, y: 1 },
+    rotation: transformParams?.rotation ?? 0,
+    anchorPoint: transformParams?.anchorPoint ?? { x: 0.5, y: 0.5 },
+  };
+
+  // Calculate the bounds after applying the transform
+  // newBounds.x/y can be negative if content moves left/up
+  const newBounds = calculateTransformedBounds(sourceWidth, sourceHeight, safeParams);
+
+  // Calculate canvas extents that include both origin and transformed content
+  const minX = Math.min(0, newBounds.x);
+  const minY = Math.min(0, newBounds.y);
+  const maxX = Math.max(sourceWidth, newBounds.x + newBounds.width);
+  const maxY = Math.max(sourceHeight, newBounds.y + newBounds.height);
+
+  // Canvas dimensions to fit everything
+  const canvasWidth = Math.ceil(maxX - minX);
+  const canvasHeight = Math.ceil(maxY - minY);
+
+  const newCanvas = new OffscreenCanvas(canvasWidth, canvasHeight);
+  const ctx = newCanvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('Failed to get 2d context for transform canvas');
+  }
+
+  // Clear with transparency
+  ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+  // The offset to bring content into positive canvas space
+  // If minX is -100, we need to shift everything right by 100
+  const offsetX = -minX;
+  const offsetY = -minY;
+
+  // Apply the transform
+  ctx.save();
+
+  // Calculate anchor point in the canvas coordinate system
+  // The original (0,0) is now at (offsetX, offsetY) in canvas space
+  const anchorX = offsetX + sourceWidth * safeParams.anchorPoint.x;
+  const anchorY = offsetY + sourceHeight * safeParams.anchorPoint.y;
+
+  ctx.translate(anchorX + safeParams.position.x, anchorY + safeParams.position.y);
+  ctx.rotate((safeParams.rotation * Math.PI) / 180);
+  ctx.scale(safeParams.scale.x, safeParams.scale.y);
+  ctx.translate(-sourceWidth * safeParams.anchorPoint.x, -sourceHeight * safeParams.anchorPoint.y);
+
+  // Draw the source canvas at the offset position (where original 0,0 now lives)
+  ctx.drawImage(sourceCanvas, 0, 0);
+
+  ctx.restore();
+
+  return newCanvas;
+}
+
+/**
+ * Check if an operation is a transform type (handled via 2D canvas, not GPU)
+ */
+function isTransformOperation(op: OperationNode): boolean {
+  return op.operationType === 'transform';
+}
 
 interface UseChainRendererOptions {
   /** Node ID to render */
@@ -230,33 +310,103 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
       // Get the layer's base transform for applying position/scale/rotation
       const transform = sourceLayer.baseTransform;
 
-      // Helper to apply transform and draw bitmap with cropping
-      const drawTransformedBitmap = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-        // Clear with transparency (or draw checkerboard if needed)
-        ctx.clearRect(0, 0, width, height);
+      /**
+       * Apply baseTransform to the bitmap and return an expanded canvas that fits all content.
+       * This prevents clipping when content extends outside the original dimensions.
+       *
+       * The canvas is sized to include both:
+       * - The original layer bounds (0,0 to srcWidth,srcHeight)
+       * - The transformed content bounds (may extend beyond original in any direction)
+       */
+      const applyBaseTransform = (inputBitmap: ImageBitmap): OffscreenCanvas => {
+        const srcWidth = inputBitmap.width;
+        const srcHeight = inputBitmap.height;
 
-        // Save context state
+        // Convert baseTransform to TransformParams format for bounds calculation
+        const transformParams: TransformParams = {
+          position: transform.position,
+          scale: transform.scale,
+          rotation: transform.rotation,
+          anchorPoint: transform.anchorPoint,
+        };
+
+        // Calculate the bounds after applying the transform
+        // newBounds.x/y can be negative if content moves left/up
+        const newBounds = calculateTransformedBounds(srcWidth, srcHeight, transformParams);
+
+        // Calculate canvas extents that include both origin and transformed content
+        // minX/minY: leftmost/topmost point (could be 0 or negative transformed coord)
+        // maxX/maxY: rightmost/bottommost point (original extent or transformed extent)
+        const minX = Math.min(0, newBounds.x);
+        const minY = Math.min(0, newBounds.y);
+        const maxX = Math.max(srcWidth, newBounds.x + newBounds.width);
+        const maxY = Math.max(srcHeight, newBounds.y + newBounds.height);
+
+        // Canvas dimensions to fit everything
+        const canvasWidth = Math.ceil(maxX - minX);
+        const canvasHeight = Math.ceil(maxY - minY);
+
+        const resultCanvas = new OffscreenCanvas(canvasWidth, canvasHeight);
+        const ctx = resultCanvas.getContext('2d');
+        if (!ctx) {
+          throw new Error('Failed to get 2d context for base transform canvas');
+        }
+
+        // Clear with transparency
+        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+        // The offset to bring content into positive canvas space
+        // If minX is -100, we need to shift everything right by 100
+        const offsetX = -minX;
+        const offsetY = -minY;
+
+        // Apply the transform
         ctx.save();
 
-        // Apply transform: translate, then rotate, then scale
-        // Anchor point determines the transform origin
-        const anchorX = transform.anchorPoint.x * width;
-        const anchorY = transform.anchorPoint.y * height;
+        // Calculate anchor point in the canvas coordinate system
+        // The original (0,0) is now at (offsetX, offsetY) in canvas space
+        const anchorX = offsetX + srcWidth * transform.anchorPoint.x;
+        const anchorY = offsetY + srcHeight * transform.anchorPoint.y;
 
         // Move to anchor, apply transforms, move back
         ctx.translate(anchorX + transform.position.x, anchorY + transform.position.y);
         ctx.rotate((transform.rotation * Math.PI) / 180);
         ctx.scale(transform.scale.x, transform.scale.y);
-        ctx.translate(-anchorX, -anchorY);
+        ctx.translate(-srcWidth * transform.anchorPoint.x, -srcHeight * transform.anchorPoint.y);
 
         // Draw the bitmap
+        ctx.drawImage(inputBitmap, 0, 0);
+
+        ctx.restore();
+
+        return resultCanvas;
+      };
+
+      /**
+       * Legacy helper for drawing directly to display canvas (clipped to canvas size).
+       * Used when there are no operations to process.
+       */
+      const drawTransformedBitmapClipped = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+        // Clear with transparency
+        ctx.clearRect(0, 0, width, height);
+
+        ctx.save();
+
+        // Apply transform with clipping to canvas bounds
+        const anchorX = transform.anchorPoint.x * width;
+        const anchorY = transform.anchorPoint.y * height;
+
+        ctx.translate(anchorX + transform.position.x, anchorY + transform.position.y);
+        ctx.rotate((transform.rotation * Math.PI) / 180);
+        ctx.scale(transform.scale.x, transform.scale.y);
+        ctx.translate(-anchorX, -anchorY);
+
         ctx.drawImage(bitmap, 0, 0, width, height);
 
-        // Restore context state
         ctx.restore();
       };
 
-      // If no operation nodes in chain, just draw directly at full resolution
+      // If no operation nodes in chain, just draw directly at full resolution (clipped to layer bounds)
       if (chain.operationNodes.length === 0) {
         // Set canvas to full resolution - CSS handles display scaling
         canvas.width = bitmap.width;
@@ -264,7 +414,7 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
 
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          drawTransformedBitmap(ctx, bitmap.width, bitmap.height);
+          drawTransformedBitmapClipped(ctx, bitmap.width, bitmap.height);
         }
         lastRenderedFrameRef.current = sourceFrame;
         lastParamsHashRef.current = paramsHash;
@@ -278,13 +428,13 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
       const pipeline = pipelineRef.current;
 
       if (!gpuContext || !texturePool || !pipeline) {
-        // Fallback to 2D canvas without effects - full resolution
+        // Fallback to 2D canvas without effects - full resolution (clipped to layer bounds)
         canvas.width = bitmap.width;
         canvas.height = bitmap.height;
 
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          drawTransformedBitmap(ctx, bitmap.width, bitmap.height);
+          drawTransformedBitmapClipped(ctx, bitmap.width, bitmap.height);
         }
         lastRenderedFrameRef.current = sourceFrame;
         lastParamsHashRef.current = paramsHash;
@@ -292,23 +442,17 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
         return;
       }
 
-      // Build render nodes from operation chain
+      // Get enabled operations in chain order
       const enabledOps = chain.operationNodes.filter((op) => op.isEnabled);
-      const renderNodes: RenderNode[] = enabledOps.map((op, index) => ({
-        id: op.id,
-        effectName: OPERATION_TO_EFFECT[op.operationType] ?? op.operationType,
-        parameters: op.params as unknown as Record<string, UniformValue>,
-        inputIds: index === 0 ? ['source'] : [enabledOps[index - 1].id],
-      }));
 
-      // If all operations are disabled, draw without effects - full resolution
-      if (renderNodes.length === 0) {
+      // If all operations are disabled, draw without effects - full resolution (clipped to layer bounds)
+      if (enabledOps.length === 0) {
         canvas.width = bitmap.width;
         canvas.height = bitmap.height;
 
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          drawTransformedBitmap(ctx, bitmap.width, bitmap.height);
+          drawTransformedBitmapClipped(ctx, bitmap.width, bitmap.height);
         }
         lastRenderedFrameRef.current = sourceFrame;
         lastParamsHashRef.current = paramsHash;
@@ -316,48 +460,86 @@ export function useChainRenderer(options: UseChainRendererOptions): ChainRendere
         return;
       }
 
-      // Create a transformed bitmap for GPU upload
-      // This applies the layer's baseTransform before GPU effects
-      const transformCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-      const transformCtx = transformCanvas.getContext('2d');
-      if (transformCtx) {
-        drawTransformedBitmap(transformCtx as unknown as CanvasRenderingContext2D, bitmap.width, bitmap.height);
+      // Step 1: Apply baseTransform to create initial transformed canvas
+      // This expands the canvas to fit all transformed content (no clipping)
+      let currentCanvas: OffscreenCanvas = applyBaseTransform(bitmap);
+
+      // Step 2: Process operations in chain order
+      // Group consecutive GPU operations for batch processing
+      let i = 0;
+      while (i < enabledOps.length) {
+        const op = enabledOps[i];
+
+        if (isTransformOperation(op)) {
+          // Apply transform operation via 2D canvas
+          const params = op.params as TransformParams;
+          currentCanvas = await applyTransformOperation(currentCanvas, params);
+          i++;
+        } else {
+          // Collect consecutive GPU operations
+          const gpuBatch: OperationNode[] = [];
+          while (i < enabledOps.length && !isTransformOperation(enabledOps[i])) {
+            gpuBatch.push(enabledOps[i]);
+            i++;
+          }
+
+          // Process GPU batch
+          if (gpuBatch.length > 0) {
+            // Build render nodes for this batch
+            const renderNodes: RenderNode[] = gpuBatch.map((gpuOp, index) => ({
+              id: gpuOp.id,
+              effectName: OPERATION_TO_EFFECT[gpuOp.operationType] ?? gpuOp.operationType,
+              parameters: gpuOp.params as unknown as Record<string, UniformValue>,
+              inputIds: index === 0 ? ['source'] : [gpuBatch[index - 1].id],
+            }));
+
+            // Create bitmap from current canvas for GPU upload
+            const inputBitmap = await createImageBitmap(currentCanvas);
+            const gpuWidth = inputBitmap.width;
+            const gpuHeight = inputBitmap.height;
+
+            // Resize offscreen canvas to match dimensions
+            const offscreen = offscreenCanvasRef.current;
+            if (offscreen) {
+              offscreen.width = gpuWidth;
+              offscreen.height = gpuHeight;
+              gpuContext.resize(gpuWidth, gpuHeight);
+            }
+
+            // Upload to GPU
+            const sourceTexture = gpuContext.uploadImageBitmap(inputBitmap);
+            inputBitmap.close();
+
+            // Evaluate the effect pipeline
+            const outputTexture = pipeline.evaluate(renderNodes, sourceTexture, sourceFrame);
+
+            // Read result back
+            const pixels = gpuContext.readPixels(outputTexture);
+            const clampedPixels = new Uint8ClampedArray(pixels.length);
+            clampedPixels.set(pixels);
+            const imageData = new ImageData(clampedPixels, gpuWidth, gpuHeight);
+
+            // Update currentCanvas with GPU output
+            currentCanvas = new OffscreenCanvas(gpuWidth, gpuHeight);
+            const outputCtx = currentCanvas.getContext('2d');
+            if (outputCtx) {
+              outputCtx.putImageData(imageData, 0, 0);
+            }
+
+            // Clean up
+            sourceTexture.dispose();
+          }
+        }
       }
-      const transformedBitmap = await createImageBitmap(transformCanvas);
 
-      // Resize offscreen canvas
-      const offscreen = offscreenCanvasRef.current;
-      if (offscreen) {
-        offscreen.width = bitmap.width;
-        offscreen.height = bitmap.height;
-        gpuContext.resize(bitmap.width, bitmap.height);
-      }
-
-      // Upload transformed source frame to GPU
-      const sourceTexture = gpuContext.uploadImageBitmap(transformedBitmap);
-      transformedBitmap.close(); // Clean up the transformed bitmap
-
-      // Evaluate the effect pipeline
-      const outputTexture = pipeline.evaluate(renderNodes, sourceTexture, sourceFrame);
-
-      // Read result back and draw to canvas at full resolution
-      const pixels = gpuContext.readPixels(outputTexture);
-      // Copy to a new Uint8ClampedArray to ensure proper buffer type
-      const clampedPixels = new Uint8ClampedArray(pixels.length);
-      clampedPixels.set(pixels);
-      const imageData = new ImageData(clampedPixels, bitmap.width, bitmap.height);
-
-      // Set canvas to full resolution - CSS handles display scaling
-      canvas.width = bitmap.width;
-      canvas.height = bitmap.height;
+      // Step 3: Draw final result to display canvas
+      canvas.width = currentCanvas.width;
+      canvas.height = currentCanvas.height;
 
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.putImageData(imageData, 0, 0);
+        ctx.drawImage(currentCanvas, 0, 0);
       }
-
-      // Clean up source texture
-      sourceTexture.dispose();
 
       lastRenderedFrameRef.current = sourceFrame;
       lastParamsHashRef.current = paramsHash;
