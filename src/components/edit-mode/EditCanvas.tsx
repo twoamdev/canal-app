@@ -127,7 +127,7 @@ export function EditCanvas({
   return (
     <div
       onClick={handleCanvasClick}
-      className="absolute bg-transparent overflow-hidden"
+      className="absolute bg-transparent overflow-hidden rounded-sm"
       style={{
         left: canvasLeft,
         top: canvasTop,
@@ -137,21 +137,21 @@ export function EditCanvas({
     >
       {/* Checkerboard background pattern */}
       <div
-        className="absolute inset-0 opacity-0 pointer-events-none"
+        className="absolute inset-0 opacity-100 pointer-events-none"
         style={{
           backgroundImage: `
             repeating-conic-gradient(
-              #808080 0% 25%,
+              #404040 0% 25%,
               #404040 0% 50%
             )
           `,
-          backgroundSize: '20px 20px',
+          backgroundSize: '40px 40px',
         }}
       />
 
       {/* Layer bounds indicator (dashed outline) - the "crop boundary" */}
       <div
-        className="absolute border-2 border-dashed border-white/40 pointer-events-none z-10"
+        className="absolute border-1 border-dashed border-white/40 pointer-events-none z-10"
         style={{
           left: layerBoundsLeft,
           top: layerBoundsTop,
@@ -161,7 +161,7 @@ export function EditCanvas({
       >
         {/* Label */}
         <div className="absolute -top-6 left-0 text-xs text-white/60 whitespace-nowrap">
-          Layer Bounds (Crop Area)
+          Frame
         </div>
       </div>
 

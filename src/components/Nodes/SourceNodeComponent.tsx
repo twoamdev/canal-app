@@ -1,7 +1,7 @@
 /**
  * SourceNode Component
  *
- * Unified source node that displays video, image, shape, or composition assets.
+ * Source node that displays video, image, shape, or composition assets.
  * Shows preview and layer information.
  *
  * Features:
@@ -11,13 +11,11 @@
  */
 
 import { useCallback, useRef, useEffect, useState, useMemo } from 'react';
-import { Handle, Position, useViewport, useUpdateNodeInternals, useReactFlow } from '@xyflow/react';
+import { useViewport } from '@xyflow/react';
 import type { SourceNode } from '../../types/scene-graph';
 import { useAssetStore } from '../../stores/assetStore';
-import { useGraphStore } from '../../stores/graphStore';
 import { useLayerStore } from '../../stores/layerStore';
 import { useTimelineStore } from '../../stores/timelineStore';
-import { useConnectionStore } from '../../stores/connectionStore';
 import { useEditModeStore } from '../../stores/editModeStore';
 import { loadAssetFrame, mapGlobalFrameToSource, globalFrameCache } from '../../utils/asset-loader';
 import {
@@ -32,9 +30,7 @@ import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { FileVideo, Image, Shapes, Layers } from 'lucide-react';
 import { AssetViewer, drawCheckerboard, DEFAULT_VIEWER_WIDTH, DEFAULT_VIEWER_HEIGHT } from '../viewers';
-
-// Handle size constant
-const HANDLE_BASE_SIZE = 12;
+import { BaseNodeComponent, type NodeVariant } from './BaseNodeComponent';
 
 // Asset type icons
 const ASSET_ICONS = {
@@ -45,38 +41,11 @@ const ASSET_ICONS = {
 };
 
 // Asset type variants
-const ASSET_VARIANTS = {
-  video: 'primary',
-  image: 'success',
-  shape: 'warning',
+const ASSET_VARIANTS: Record<string, NodeVariant> = {
+  video: 'default',
+  image: 'default',
+  shape: 'default',
   composition: 'default',
-} as const;
-
-const variantStyles = {
-  default: {
-    ring: 'ring-border',
-    ringSelected: 'ring-foreground',
-    iconBg: 'bg-muted',
-    iconText: 'text-muted-foreground',
-  },
-  primary: {
-    ring: 'ring-primary/30',
-    ringSelected: 'ring-primary',
-    iconBg: 'bg-primary/10',
-    iconText: 'text-primary',
-  },
-  success: {
-    ring: 'ring-green-500/30',
-    ringSelected: 'ring-green-500',
-    iconBg: 'bg-green-500/10',
-    iconText: 'text-green-600',
-  },
-  warning: {
-    ring: 'ring-yellow-500/30',
-    ringSelected: 'ring-yellow-500',
-    iconBg: 'bg-yellow-500/10',
-    iconText: 'text-yellow-600',
-  },
 };
 
 interface SourceNodeComponentProps {
@@ -85,14 +54,41 @@ interface SourceNodeComponentProps {
   selected?: boolean;
 }
 
-export function SourceNodeComponent(props: SourceNodeComponentProps) {
-  const { id, data, selected } = props;
-
+export function SourceNodeComponent({ id, data, selected }: SourceNodeComponentProps) {
   // Fetch layer from LayerStore
   const layer = useLayerStore((s) => s.layers[data.layerId]);
 
   // Refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const lastRenderedFrameRef = useRef<number | null>(null);
+  const canvasDimensionsRef = useRef<{ width: number; height: number } | null>(null);
+  const isInitialLoadRef = useRef(true);
+
+  // State - only show loading on initial load, not during playback
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Stores
+  const assets = useAssetStore((s) => s.assets);
+  const enterEditMode = useEditModeStore((s) => s.enterEditMode);
+
+  // ReactFlow
+  const { zoom } = useViewport();
+
+  // Optimized frame subscription:
+  // - Selected nodes subscribe to currentFrame for real-time updates
+  // - Unselected nodes only subscribe to pauseTrigger to update when playback stops
+  const pauseTrigger = useTimelineStore((s) => s.pauseTrigger);
+  const globalFrame = useTimelineStore((s) => selected ? s.currentFrame : null);
+
+  // Determine the frame to render
+  const currentFrame = useMemo(() => {
+    if (selected && globalFrame !== null) {
+      return globalFrame;
+    }
+    return useTimelineStore.getState().currentFrame;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, globalFrame, pauseTrigger]);
 
   // Early return if layer not found
   if (!layer) {
@@ -105,49 +101,9 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
       </Card>
     );
   }
-  const lastRenderedFrameRef = useRef<number | null>(null);
-  const canvasDimensionsRef = useRef<{ width: number; height: number } | null>(null);
-  const isInitialLoadRef = useRef(true);
-
-  // State - only show loading on initial load, not during playback
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Stores
-  const assets = useAssetStore((s) => s.assets);
-  const activeConnection = useConnectionStore((s) => s.activeConnection);
-  const startConnection = useConnectionStore((s) => s.startConnection);
-  const cancelConnection = useConnectionStore((s) => s.cancelConnection);
-  const addEdge = useGraphStore((s) => s.addEdge);
-
-  // Optimized frame subscription:
-  // - Selected nodes subscribe to currentFrame for real-time updates
-  // - Unselected nodes only subscribe to pauseTrigger to update when playback stops
-  const pauseTrigger = useTimelineStore((s) => s.pauseTrigger);
-
-  // Only subscribe to currentFrame when selected - this prevents re-renders during playback
-  const globalFrame = useTimelineStore((s) => selected ? s.currentFrame : null);
-
-  // Determine the frame to render:
-  // - If selected: use globalFrame (real-time updates)
-  // - If not selected: use cached frame, updated only when pauseTrigger changes
-  const currentFrame = useMemo(() => {
-    if (selected && globalFrame !== null) {
-      return globalFrame;
-    }
-    // When not selected, read current frame directly from store on pauseTrigger change
-    // This avoids subscription but still updates when playback stops
-    return useTimelineStore.getState().currentFrame;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, globalFrame, pauseTrigger]);
-
-  // ReactFlow
-  const { zoom } = useViewport();
-  const { getNode } = useReactFlow();
-  const updateNodeInternals = useUpdateNodeInternals();
 
   // Get the asset
-  const asset = useMemo(() => assets[layer.assetId], [assets, layer.assetId]);
+  const asset = assets[layer.assetId];
 
   // Check if asset is still being processed
   const assetIsLoading = asset ? isAssetLoading(asset) : true;
@@ -157,15 +113,9 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
   const assetType = asset?.type ?? 'video';
   const dimensions = asset ? getAssetDimensions(asset) : { width: DEFAULT_VIEWER_WIDTH, height: DEFAULT_VIEWER_HEIGHT };
   const variant = ASSET_VARIANTS[assetType] ?? 'default';
-  const styles = variantStyles[variant];
   const IconComponent = ASSET_ICONS[assetType] ?? FileVideo;
 
-  // Update handle positions when zoom changes
-  useEffect(() => {
-    updateNodeInternals(id);
-  }, [zoom, id, updateNodeInternals]);
-
-  // Initialize canvas with proper dimensions (full resolution for quality)
+  // Initialize canvas with proper dimensions
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -173,15 +123,12 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Set canvas to full asset resolution - CSS will handle display scaling
     if (!canvasDimensionsRef.current ||
         canvasDimensionsRef.current.width !== dimensions.width ||
         canvasDimensionsRef.current.height !== dimensions.height) {
       canvas.width = dimensions.width;
       canvas.height = dimensions.height;
       canvasDimensionsRef.current = { width: dimensions.width, height: dimensions.height };
-
-      // Draw initial checkerboard
       drawCheckerboard(ctx, dimensions.width, dimensions.height);
     }
   }, [dimensions]);
@@ -191,7 +138,6 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
     if (!asset || !canvasRef.current) return;
     if (!isVideoAsset(asset) && !isImageAsset(asset)) return;
 
-    // Don't try to load frames if asset is still being processed
     if (assetIsLoading) {
       const canvas = canvasRef.current;
       const ctx = canvas.getContext('2d');
@@ -205,29 +151,20 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Map global frame to source frame
-    const sourceFrame = mapGlobalFrameToSource(
-      currentFrame,
-      layer.timeRange,
-      asset
-    );
+    const sourceFrame = mapGlobalFrameToSource(currentFrame, layer.timeRange, asset);
 
-    // If null, layer is not active at this frame - show checkerboard
     if (sourceFrame === null) {
       drawCheckerboard(ctx, canvas.width, canvas.height);
       lastRenderedFrameRef.current = null;
       return;
     }
 
-    // Skip if we already rendered this frame
     if (lastRenderedFrameRef.current === sourceFrame) {
       return;
     }
 
-    // Check cache first - render immediately without async
     const cached = globalFrameCache.get(asset.id, sourceFrame);
     if (cached) {
-      // Update canvas dimensions if needed (only if they've actually changed)
       if (canvas.width !== cached.width || canvas.height !== cached.height) {
         canvas.width = cached.width;
         canvas.height = cached.height;
@@ -240,7 +177,6 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
       return;
     }
 
-    // Load frame asynchronously - DON'T clear the canvas, keep the previous frame visible
     loadAssetFrame(asset, sourceFrame)
       .then((bitmap) => {
         if (!canvasRef.current) return;
@@ -249,19 +185,14 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        // Update canvas dimensions only if they've changed
         if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
           canvas.width = bitmap.width;
           canvas.height = bitmap.height;
           canvasDimensionsRef.current = { width: bitmap.width, height: bitmap.height };
         }
 
-        // Draw the frame
         ctx.drawImage(bitmap, 0, 0);
-
-        // Cache the frame for future use
         globalFrameCache.set(asset.id, sourceFrame, bitmap);
-
         lastRenderedFrameRef.current = sourceFrame;
         setInitialLoading(false);
         isInitialLoadRef.current = false;
@@ -269,78 +200,23 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
       })
       .catch((err) => {
         console.error('Failed to load frame:', err);
-        // Only show error on initial load, not during playback
         if (isInitialLoadRef.current) {
           setError('Failed to load frame');
         }
       });
   }, [asset, assetIsLoading, currentFrame, layer.timeRange]);
 
-  // Handle click on output (source) handle
-  const handleSourceClick = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-
-    // If there's an active connection from a target handle, complete the connection
-    if (activeConnection?.handleType === 'target' && activeConnection?.nodeId !== id) {
-      addEdge({
-        id: `edge_${Date.now()}`,
-        source: id,
-        target: activeConnection.nodeId,
-        sourceHandle: null,
-        targetHandle: null,
-      });
-      cancelConnection();
-      return;
-    }
-
-    // If already connecting from this handle, cancel
-    if (activeConnection?.nodeId === id && activeConnection?.handleType === 'source') {
-      cancelConnection();
-      return;
-    }
-
-    // Start new connection
-    if (activeConnection?.handleType === 'source') {
-      cancelConnection();
-    }
-
-    const node = getNode(id);
-    if (!node) return;
-
-    const handleX = node.position.x + (node.measured?.width ?? 200) / 2;
-    const handleY = node.position.y + (node.measured?.height ?? 100);
-
-    startConnection({
-      nodeId: id,
-      handleType: 'source',
-      handlePosition: Position.Bottom,
-      x: handleX,
-      y: handleY,
-    });
-  }, [id, activeConnection, startConnection, cancelConnection, getNode, addEdge]);
-
-  // Check if this handle is a valid drop target
-  const isValidSourceTarget = activeConnection?.handleType === 'target' && activeConnection?.nodeId !== id;
-
   // Edit mode - click on viewer when selected to enter edit mode
-  const enterEditMode = useEditModeStore((s) => s.enterEditMode);
-
   const handleViewerClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    // Only enter edit mode if this node is selected
     if (!selected) return;
 
-    e.stopPropagation(); // Prevent ReactFlow from deselecting
+    e.stopPropagation();
 
-    // Get the viewer's screen bounds
     const viewerRect = e.currentTarget.getBoundingClientRect();
-
-    // Find the node element to calculate viewer's offset from node position
     const nodeElement = e.currentTarget.closest('.react-flow__node');
     const nodeRect = nodeElement?.getBoundingClientRect();
 
     const viewerInfo = {
-      // Offset of viewer from node's top-left corner (in current screen pixels)
       offsetX: nodeRect ? viewerRect.left - nodeRect.left : 0,
       offsetY: nodeRect ? viewerRect.top - nodeRect.top : 0,
       width: viewerRect.width,
@@ -351,7 +227,7 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
     enterEditMode(id, data.layerId, viewerInfo);
   }, [selected, id, data.layerId, enterEditMode, zoom]);
 
-  // Render shape preview SVG (parent handles dimensions and background)
+  // Render shape preview SVG
   const renderShapePreview = () => {
     if (!asset || !isShapeAsset(asset)) return null;
 
@@ -360,12 +236,8 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
     const height = asset.intrinsicHeight;
 
     return (
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        className="w-full h-full"
-      >
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full">
         {paths && paths.length > 0 ? (
-          // Multi-path SVG: render each path with its own style
           paths.map((p, i) => (
             <path
               key={i}
@@ -384,7 +256,6 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
             />
           ))
         ) : (
-          // Single path fallback
           <path
             d={pathData}
             fill={fillColor ?? '#ffffff'}
@@ -397,7 +268,7 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
     );
   };
 
-  // Render composition preview (parent handles dimensions and background)
+  // Render composition preview
   const renderCompositionPreview = () => {
     if (!asset || !isCompositionAsset(asset)) return null;
 
@@ -411,136 +282,94 @@ export function SourceNodeComponent(props: SourceNodeComponentProps) {
     );
   };
 
-  // Render loading indicator for asset processing
-  const renderAssetProcessing = () => {
-    return (
-      <AssetViewer
-        canvasRef={canvasRef}
-        width={dimensions.width}
-        height={dimensions.height}
-        isLoading={true}
-        loadingProgress={loadingProgress}
-      />
-    );
-  };
+  // Build sub-label (dimensions or processing state)
+  const subLabel = assetIsLoading
+    ? 'Processing...'
+    : `${dimensions.width} × ${dimensions.height}`;
 
   return (
-    <Card
-      className={cn(
-        'min-w-[200px] p-4 transition-all duration-200 ring-2',
-        selected ? styles.ringSelected : styles.ring,
-        'hover:shadow-lg'
-      )}
+    <BaseNodeComponent
+      id={id}
+      selected={selected}
+      hasInputHandle={false}
+      hasOutputHandle={true}
+      icon={IconComponent}
+      label={layer.name || asset?.name || 'Source'}
+      subLabel={subLabel}
+      variant={variant}
+      onViewerClick={handleViewerClick}
+      viewerClickable={true}
     >
-      {/* No input handle for source nodes */}
-
-      {/* Node content */}
-      <div className="flex flex-col gap-2">
-        {/* Icon and label header */}
-        <div className="flex items-center gap-2">
-          <div className={cn('w-8 h-8 rounded flex items-center justify-center', styles.iconBg)}>
-            <div className={styles.iconText}>
-              <IconComponent className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-semibold text-sm text-foreground truncate">
-              {layer.name || asset?.name || 'Source'}
-            </p>
-            {dimensions && !assetIsLoading && (
-              <p className="text-xs text-muted-foreground tabular-nums">
-                {dimensions.width} × {dimensions.height}
-              </p>
-            )}
-            {assetIsLoading && (
-              <p className="text-xs text-muted-foreground">
-                Processing...
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Preview content - click to enter edit mode when selected */}
+      {/* Preview content with transform applied */}
+      <div
+        className={cn(
+          'text-xs text-muted-foreground rounded overflow-hidden transition-all relative',
+          selected && 'ring-2 ring-primary/30 hover:ring-primary/50'
+        )}
+        style={{
+          width: dimensions.width,
+          height: dimensions.height,
+        }}
+      >
+        {/* Checkerboard background for transparency */}
         <div
-          onClick={handleViewerClick}
-          className={cn(
-            'text-xs text-muted-foreground rounded overflow-hidden transition-all relative',
-            selected && 'cursor-pointer ring-2 ring-primary/30 hover:ring-primary/50'
-          )}
-          title={selected ? 'Click to edit content' : undefined}
+          className="absolute inset-0"
+          style={{
+            backgroundImage: `repeating-conic-gradient(#2a2a2a 0% 25%, #3a3a3a 0% 50%)`,
+            backgroundSize: '16px 16px',
+          }}
+        />
+
+        {/* Transformed content wrapper - applies layer.baseTransform */}
+        <div
+          className="absolute"
           style={{
             width: dimensions.width,
             height: dimensions.height,
+            transform: `
+              translate(${layer.baseTransform.position.x}px, ${layer.baseTransform.position.y}px)
+              scale(${layer.baseTransform.scale.x}, ${layer.baseTransform.scale.y})
+              rotate(${layer.baseTransform.rotation}deg)
+            `,
+            transformOrigin: `${layer.baseTransform.anchorPoint.x * 100}% ${layer.baseTransform.anchorPoint.y * 100}%`,
           }}
         >
-          {/* Checkerboard background for transparency */}
-          <div
-            className="absolute inset-0"
-            style={{
-              backgroundImage: `repeating-conic-gradient(#2a2a2a 0% 25%, #3a3a3a 0% 50%)`,
-              backgroundSize: '16px 16px',
-            }}
-          />
-
-          {/* Transformed content wrapper - applies layer.baseTransform */}
-          <div
-            className="absolute"
-            style={{
-              width: dimensions.width,
-              height: dimensions.height,
-              transform: `
-                translate(${layer.baseTransform.position.x}px, ${layer.baseTransform.position.y}px)
-                scale(${layer.baseTransform.scale.x}, ${layer.baseTransform.scale.y})
-                rotate(${layer.baseTransform.rotation}deg)
-              `,
-              transformOrigin: `${layer.baseTransform.anchorPoint.x * 100}% ${layer.baseTransform.anchorPoint.y * 100}%`,
-            }}
-          >
-            {/* Asset processing state */}
-            {assetIsLoading && renderAssetProcessing()}
-
-            {/* Video/Image preview (only when asset is ready) */}
-            {!assetIsLoading && (isVideoAsset(asset) || isImageAsset(asset)) && (
-              <AssetViewer
-                canvasRef={canvasRef}
-                width={dimensions.width}
-                height={dimensions.height}
-                isLoading={initialLoading}
-                error={error}
-              />
-            )}
-
-            {/* Shape preview */}
-            {!assetIsLoading && isShapeAsset(asset) && renderShapePreview()}
-
-            {/* Composition preview */}
-            {!assetIsLoading && isCompositionAsset(asset) && renderCompositionPreview()}
-          </div>
-
-          {/* No asset message */}
-          {!asset && (
-            <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/60 border border-dashed border-muted rounded">
-              Asset not found
-            </div>
+          {/* Asset processing state */}
+          {assetIsLoading && (
+            <AssetViewer
+              canvasRef={canvasRef}
+              width={dimensions.width}
+              height={dimensions.height}
+              isLoading={true}
+              loadingProgress={loadingProgress}
+            />
           )}
-        </div>
-      </div>
 
-      {/* Output handle on bottom */}
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className={cn(
-          '!bg-muted-foreground hover:!bg-foreground transition-colors cursor-pointer',
-          isValidSourceTarget && '!bg-primary !scale-125'
+          {/* Video/Image preview */}
+          {!assetIsLoading && (isVideoAsset(asset) || isImageAsset(asset)) && (
+            <AssetViewer
+              canvasRef={canvasRef}
+              width={dimensions.width}
+              height={dimensions.height}
+              isLoading={initialLoading}
+              error={error}
+            />
+          )}
+
+          {/* Shape preview */}
+          {!assetIsLoading && isShapeAsset(asset) && renderShapePreview()}
+
+          {/* Composition preview */}
+          {!assetIsLoading && isCompositionAsset(asset) && renderCompositionPreview()}
+        </div>
+
+        {/* No asset message */}
+        {!asset && (
+          <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/60 border border-dashed border-muted rounded">
+            Asset not found
+          </div>
         )}
-        style={{
-          width: HANDLE_BASE_SIZE / zoom,
-          height: HANDLE_BASE_SIZE / zoom,
-          bottom: -(HANDLE_BASE_SIZE / zoom),
-        }}
-        onClick={handleSourceClick}
-      />
-    </Card>
+      </div>
+    </BaseNodeComponent>
   );
 }

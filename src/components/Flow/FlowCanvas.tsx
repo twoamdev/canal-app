@@ -17,9 +17,8 @@ import { initializeCompositionSystem } from '../../stores/compositionStore';
 import { useCommandMenuStore } from '../../stores/commandMenuStore';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { NodeCommandMenu } from './NodeCommandMenu';
-import { SourceNodeComponent, OperationNodeComponent } from '../nodes';
+import { SourceNodeComponent, OperationNodeComponent, EmptyNodeComponent } from '../nodes';
 import { ZoomInvariantEdge, ZoomInvariantConnectionLine, ClickConnectionLine } from '../edges';
-import { EmptyNodeComponent } from '../nodes/EmptyNodeComponent';
 import { EditModeOverlay } from '../edit-mode';
 
 // Component to initialize hotkeys inside ReactFlow context

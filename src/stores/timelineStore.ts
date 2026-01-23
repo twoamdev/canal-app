@@ -42,6 +42,7 @@ interface TimelineState {
 }
 
 export const useTimelineStore = create<TimelineState>((set, get) => ({
+
   // Initial state
   currentFrame: 0,
   frameStart: 0,
@@ -187,6 +188,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 export function initializeTimelineFromComposition(): void {
   // Small delay to ensure composition store is ready
   setTimeout(() => {
+  
     useTimelineStore.getState().syncWithComposition();
   }, 10);
 }

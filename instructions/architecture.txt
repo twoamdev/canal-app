@@ -1,0 +1,546 @@
+================================================================================
+                         CANAL APP - ARCHITECTURE DIAGRAM
+================================================================================
+                              Last Updated: 2026-01-22
+================================================================================
+
+
+================================================================================
+1. PROJECT STRUCTURE
+================================================================================
+
+canal-app/
+├── src/
+│   ├── App.tsx                    # Root component
+│   ├── main.tsx                   # Entry point
+│   │
+│   ├── types/                     # TypeScript definitions
+│   │   ├── assets.ts              # Asset type definitions (Video, Image, Shape, Composition)
+│   │   └── scene-graph.ts         # Scene graph types (Nodes, Connections, Layers, Transforms)
+│   │
+│   ├── stores/                    # Zustand state management
+│   │   ├── assetStore.ts          # Source of truth for all assets
+│   │   ├── layerStore.ts          # Layer instances (references to assets)
+│   │   ├── graphStore.ts          # ReactFlow bridge for scene graph
+│   │   ├── compositionStore.ts    # Active composition management
+│   │   ├── timelineStore.ts       # Playback state & current frame
+│   │   ├── editModeStore.ts       # Transform edit mode state
+│   │   ├── connectionStore.ts     # Click-to-connect state
+│   │   ├── commandMenuStore.ts    # Node command menu state
+│   │   └── panelStore.ts          # UI panel state
+│   │
+│   ├── components/
+│   │   ├── flow/                  # ReactFlow canvas
+│   │   │   ├── FlowCanvas.tsx     # Main canvas component
+│   │   │   └── NodeCommandMenu.tsx # Add node menu
+│   │   │
+│   │   ├── nodes/                 # Node components
+│   │   │   ├── SourceNodeComponent.tsx    # Source node (asset input)
+│   │   │   ├── OperationNodeComponent.tsx # Operation node (effects)
+│   │   │   └── EmptyNodeComponent.tsx     # Placeholder node
+│   │   │
+│   │   ├── edges/                 # Edge components
+│   │   │   ├── ZoomInvariantEdge.tsx
+│   │   │   ├── ZoomInvariantConnectionLine.tsx
+│   │   │   └── ClickConnectionLine.tsx
+│   │   │
+│   │   ├── edit-mode/             # Transform editing overlay
+│   │   │   ├── EditModeOverlay.tsx        # Portal overlay container
+│   │   │   ├── EditCanvas.tsx             # Source node transform editing
+│   │   │   ├── TransformEditCanvas.tsx    # Operation node transform editing
+│   │   │   └── AssetPreview.tsx           # Preview renderer
+│   │   │
+│   │   ├── viewers/               # Asset preview viewers
+│   │   │   └── AssetViewer.tsx    # Canvas-based viewer with loading states
+│   │   │
+│   │   ├── panels/                # UI panels
+│   │   │   └── PropertiesPanel.tsx # Node properties editor
+│   │   │
+│   │   ├── timeline/              # Timeline components
+│   │   │   └── TimelineScrubber.tsx # Frame scrubber
+│   │   │
+│   │   └── ui/                    # Shadcn/ui components
+│   │
+│   ├── hooks/                     # Custom React hooks
+│   │   ├── useChainRenderer.ts    # Renders effect chain for nodes
+│   │   ├── useFileImporter.ts     # File import handling
+│   │   ├── useDragAndDropFiles.ts # Drag-drop file handling
+│   │   ├── useClipboardPaste.ts   # Paste handling
+│   │   ├── useCanvasHotkeys.ts    # Keyboard shortcuts
+│   │   └── useOPFS.ts             # Origin Private File System access
+│   │
+│   ├── gpu/                       # WebGL rendering pipeline
+│   │   ├── WebGLContext.ts        # WebGL context wrapper
+│   │   ├── GPUContext.ts          # GPU context interface
+│   │   ├── RenderPipeline.ts      # Effect chain evaluator
+│   │   ├── TexturePool.ts         # Texture memory management
+│   │   ├── types.ts               # GPU type definitions
+│   │   └── effects/               # GPU effects
+│   │       ├── Effect.ts          # Base effect class
+│   │       ├── registry.ts        # Effect registration
+│   │       ├── GaussianBlurEffect.ts
+│   │       ├── ColorAdjustEffect.ts
+│   │       ├── MergeEffect.ts
+│   │       └── shaders/           # GLSL shaders
+│   │
+│   ├── utils/                     # Utility functions
+│   │   ├── scene-graph-utils.ts   # Graph traversal & chain finding
+│   │   ├── transform-utils.ts     # Bounding box calculations
+│   │   ├── asset-loader.ts        # Frame loading & caching
+│   │   ├── asset-factory.ts       # Asset creation helpers
+│   │   ├── video-decoder.ts       # Video frame extraction
+│   │   ├── video-demuxer.ts       # MP4 parsing
+│   │   ├── video-pipeline.ts      # Video processing pipeline
+│   │   ├── frame-storage.ts       # Frame persistence
+│   │   ├── image-sequence.ts      # Image sequence handling
+│   │   ├── opfs.ts                # OPFS file management
+│   │   └── svg-parser.ts          # SVG parsing for shapes
+│   │
+│   ├── rendering/                 # High-level rendering
+│   │   └── LayerRenderer.ts       # Layer composition
+│   │
+│   ├── constants/                 # App constants
+│   │   └── initialGraphNodes.ts   # Default graph state
+│   │
+│   └── lib/                       # Shared utilities
+│       └── utils.ts               # cn() and other helpers
+
+
+================================================================================
+2. CORE DATA TYPES
+================================================================================
+
+                              ASSET HIERARCHY
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                               BaseAsset                                      │
+│  - id: string                                                                │
+│  - type: 'video' | 'image' | 'shape' | 'composition'                        │
+│  - name: string                                                              │
+│  - intrinsicWidth/Height: number                                             │
+│  - createdAt/updatedAt: number                                               │
+│  - loadingState?: { isLoading, progress, error }                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │
+         ├── VideoAsset
+         │   └── metadata: { fileHandleId, duration, fps, frameCount, ... }
+         │
+         ├── ImageAsset
+         │   └── metadata: { fileHandleId, mimeType }
+         │
+         ├── ShapeAsset
+         │   └── metadata: { pathData, fillColor, strokeColor, svgStructure, ... }
+         │
+         └── CompositionAsset
+             ├── dimensions: { width, height }
+             ├── fps, durationFrames
+             ├── workAreaStart/End
+             └── graph: { nodes: Record<string, SceneNode>, edges: Connection[] }
+
+
+                              SCENE GRAPH
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              SceneNode                                       │
+│  - id: string                                                                │
+│  - position: { x, y }                                                        │
+│  - selected?: boolean                                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │
+         ├── SourceNode (type: 'source')
+         │   └── layerId: string  ──────────> references Layer
+         │
+         ├── OperationNode (type: 'operation')
+         │   ├── operationType: 'blur' | 'color_correct' | 'transform'
+         │   ├── params: BlurParams | ColorCorrectParams | TransformParams
+         │   ├── isEnabled: boolean
+         │   └── label: string
+         │
+         └── EmptyNode (type: 'empty')
+
+
+                                 LAYER
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                Layer                                         │
+│  - id: string                                                                │
+│  - assetId: string  ──────────────────────> references Asset                │
+│  - baseTransform: Transform                                                  │
+│  - timeRange: { inFrame, outFrame, sourceOffset }                           │
+│  - effects: string[]  (operation node IDs)                                  │
+│  - name: string                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+                               TRANSFORM
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  position: { x, y }                                                          │
+│  scale: { x, y }                                                             │
+│  rotation: number (degrees)                                                  │
+│  opacity: number (0-1)                                                       │
+│  anchorPoint: { x, y } (0-1 normalized, 0.5 = center)                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+3. STATE MANAGEMENT (ZUSTAND STORES)
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           AssetStore (Source of Truth)                       │
+│  - assets: Record<string, Asset>                                             │
+│  - rootCompositionId: string                                                 │
+│  - CRUD operations for assets                                                │
+│  - Composition graph operations                                              │
+│  - Persisted via zustand/persist                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │
+         │ reads
+         ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    CompositionStore                                          │
+│  - activeCompositionId: string                                               │
+│  - getActiveGraph(): { nodes, edges }                                        │
+│  - initializeCompositionSystem()                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │
+         │ provides
+         ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         GraphStore (ReactFlow Bridge)                        │
+│  - getNodes(): FlowNode[]                                                    │
+│  - getEdges(): Edge[]                                                        │
+│  - addNode/updateNode/removeNode                                             │
+│  - addEdge/removeEdge                                                        │
+│  - onNodesChange/onEdgesChange (ReactFlow handlers)                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            LayerStore                                        │
+│  - layers: Record<string, Layer>                                             │
+│  - CRUD operations for layers                                                │
+│  - Persisted via zustand/persist                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          TimelineStore                                       │
+│  - currentFrame: number                                                      │
+│  - isPlaying: boolean                                                        │
+│  - fps, duration                                                             │
+│  - play/pause/seek/scrub                                                     │
+│  - pauseTrigger: number (for unselected node updates)                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         EditModeStore                                        │
+│  - isEditMode: boolean                                                       │
+│  - editingNodeId, editingLayerId, editingOperationNodeId                    │
+│  - viewerInfo: { offsetX/Y, width/height, initialZoom }                     │
+│  - contentBounds, layerDimensions                                            │
+│  - enterEditMode / enterTransformEditMode / exitEditMode                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+4. COMPONENT HIERARCHY
+================================================================================
+
+App
+└── ReactFlowProvider
+    └── FlowCanvas
+        ├── ReactFlow
+        │   ├── Background
+        │   ├── SourceNodeComponent (for each source node)
+        │   │   └── AssetViewer (canvas preview)
+        │   ├── OperationNodeComponent (for each operation node)
+        │   │   └── AssetViewer (canvas preview)
+        │   ├── EmptyNodeComponent
+        │   ├── ZoomInvariantEdge (for each edge)
+        │   ├── ClickConnectionLine (when connecting)
+        │   └── NodeCommandMenu
+        ├── CanvasHotkeys (keyboard handling)
+        ├── ClipboardHandler (paste handling)
+        └── EditModeOverlay (portal to body)
+            ├── EditCanvas (for source node transforms)
+            │   └── React Moveable
+            └── TransformEditCanvas (for operation node transforms)
+                └── React Moveable
+    ├── PropertiesPanel
+    │   └── Properties for selected node
+    └── TimelineScrubber
+        └── Frame position controls
+
+
+================================================================================
+5. RENDERING PIPELINE
+================================================================================
+
+                           CHAIN RENDERING FLOW
+                    (useChainRenderer hook per node)
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  1. FIND UPSTREAM CHAIN                                                       │
+│     findUpstreamChain(graph, nodeId) → { sourceNode, operationNodes[] }      │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  2. LOAD SOURCE FRAME                                                         │
+│     - Get layer from sourceNode.layerId                                       │
+│     - Get asset from layer.assetId                                            │
+│     - loadAssetFrame(asset, sourceFrame) → ImageBitmap                       │
+│     - Frame caching via globalFrameCache                                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  3. APPLY BASE TRANSFORM (2D Canvas)                                          │
+│     applyBaseTransform(bitmap) → OffscreenCanvas                              │
+│     - Calculate transformed bounds                                            │
+│     - Expand canvas to fit all content (no clipping)                         │
+│     - Apply position, scale, rotation around anchor                          │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  4. PROCESS OPERATIONS IN CHAIN ORDER                                         │
+│                                                                               │
+│     For each enabled operation:                                               │
+│                                                                               │
+│     ┌─ Transform Operation ─────────────────────────────────────────────┐    │
+│     │  applyTransformOperation(canvas, params) → OffscreenCanvas        │    │
+│     │  - Calculate bounds, expand canvas                                 │    │
+│     │  - Apply transform via 2D canvas                                   │    │
+│     └───────────────────────────────────────────────────────────────────┘    │
+│                                                                               │
+│     ┌─ GPU Effects (blur, color_correct) ───────────────────────────────┐    │
+│     │  Batch consecutive GPU operations:                                 │    │
+│     │  - Upload to GPU texture                                           │    │
+│     │  - Build RenderNode[] for RenderPipeline                          │    │
+│     │  - pipeline.evaluate(nodes, sourceTexture, frame)                 │    │
+│     │  - Read back result to OffscreenCanvas                            │    │
+│     └───────────────────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  5. DRAW TO DISPLAY CANVAS                                                    │
+│     canvas.getContext('2d').drawImage(currentCanvas, 0, 0)                   │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+                              GPU RENDER PIPELINE
+                            (RenderPipeline class)
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  RenderPipeline.evaluate(nodes, sourceTexture, frameIndex)                   │
+│                                                                               │
+│  1. Topological sort nodes (dependency order)                                │
+│  2. For each node:                                                            │
+│     - Check cache (parameterHash, frameIndex)                                │
+│     - If dirty: apply effect, cache output                                   │
+│     - If cached: reuse output texture                                        │
+│  3. Return final output texture                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+                                  EFFECTS
+┌─────────────────┬───────────────────────────────────────────────────────────┐
+│ blur            │ GaussianBlurEffect - radius parameter                      │
+├─────────────────┼───────────────────────────────────────────────────────────┤
+│ color_correct   │ ColorAdjustEffect - brightness, contrast, saturation,     │
+│                 │ exposure parameters                                        │
+├─────────────────┼───────────────────────────────────────────────────────────┤
+│ transform       │ Handled via 2D canvas, not GPU                            │
+│                 │ - position, scale, rotation, anchorPoint                  │
+└─────────────────┴───────────────────────────────────────────────────────────┘
+
+
+================================================================================
+6. DATA FLOW DIAGRAMS
+================================================================================
+
+                        FILE IMPORT FLOW
+
+User drops file    useDragAndDropFiles
+       │                    │
+       ▼                    ▼
+┌─────────────┐      ┌─────────────────────┐
+│  File API   │ ───▶ │  useFileImporter    │
+└─────────────┘      │  - Detect file type │
+                     │  - Store in OPFS    │
+                     │  - Extract metadata │
+                     └─────────────────────┘
+                              │
+            ┌─────────────────┼─────────────────┐
+            ▼                 ▼                 ▼
+     ┌───────────┐     ┌───────────┐     ┌───────────┐
+     │  Video    │     │   Image   │     │   Shape   │
+     │  Decoder  │     │  Loader   │     │  Parser   │
+     └───────────┘     └───────────┘     └───────────┘
+            │                 │                 │
+            └─────────────────┼─────────────────┘
+                              ▼
+                     ┌─────────────────┐
+                     │  Create Asset   │
+                     │  (assetStore)   │
+                     └─────────────────┘
+                              │
+                              ▼
+                     ┌─────────────────┐
+                     │  Create Layer   │
+                     │  (layerStore)   │
+                     └─────────────────┘
+                              │
+                              ▼
+                     ┌─────────────────┐
+                     │  Create Node    │
+                     │  (graphStore)   │
+                     └─────────────────┘
+
+
+                    NODE CONNECTION FLOW
+
+SourceNode ──edge──▶ OperationNode ──edge──▶ OperationNode
+    │                      │                       │
+    │                      │                       │
+    ▼                      ▼                       ▼
+┌─────────┐         ┌─────────────┐         ┌─────────────┐
+│  Layer  │         │   Effect    │         │   Effect    │
+│(layerId)│         │   Params    │         │   Params    │
+└─────────┘         └─────────────┘         └─────────────┘
+    │
+    ▼
+┌─────────┐
+│  Asset  │
+│(assetId)│
+└─────────┘
+
+
+                   TRANSFORM EDIT MODE FLOW
+
+1. User clicks node viewer (selected + transform type)
+                              │
+                              ▼
+2. Calculate content bounds (upstream transforms)
+   calculateAccumulatedBounds(width, height, baseTransform, upstreamTransforms)
+                              │
+                              ▼
+3. Enter edit mode
+   editModeStore.enterTransformEditMode(nodeId, opNodeId, viewerInfo, contentBounds, layerDims)
+                              │
+                              ▼
+4. EditModeOverlay renders via portal
+   └── TransformEditCanvas
+       ├── Layer bounds outline (dashed) - original crop boundary
+       ├── Content bounds target (solid) - Moveable handles here
+       └── React Moveable
+                              │
+                              ▼
+5. User transforms via Moveable (drag/rotate/scale)
+                              │
+                              ▼
+6. onTransformChange callback
+   └── graphStore.updateNode(nodeId, { params: TransformParams })
+                              │
+                              ▼
+7. Node re-renders with updated transform
+
+
+================================================================================
+7. STORAGE & PERSISTENCE
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           LOCAL STORAGE                                      │
+│  (via zustand/persist)                                                       │
+│                                                                               │
+│  - canal-asset-storage: { assets, rootCompositionId }                       │
+│  - canal-layer-storage: { layers }                                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     ORIGIN PRIVATE FILE SYSTEM (OPFS)                        │
+│  (via opfsManager)                                                           │
+│                                                                               │
+│  /videos/                                                                    │
+│  ├── {videoId}.mp4                                                           │
+│  └── {videoId}_frames/                                                       │
+│      ├── frame_000000.webp                                                   │
+│      ├── frame_000001.webp                                                   │
+│      └── ...                                                                 │
+│                                                                               │
+│  /images/                                                                    │
+│  └── {imageId}.{ext}                                                         │
+│                                                                               │
+│  /sequences/                                                                 │
+│  └── {sequenceId}/                                                           │
+│      ├── frame_000000.png                                                    │
+│      └── ...                                                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+8. KEY CONCEPTS
+================================================================================
+
+COMPOSITION
+  - A composition is an Asset that contains a scene graph
+  - The "root composition" is the main project
+  - Compositions can be nested (comps within comps)
+
+LAYER
+  - A layer is an instance of an asset with transform properties
+  - Multiple layers can reference the same asset
+  - Layers have time ranges for timeline placement
+
+SOURCE NODE
+  - Entry point for media into the graph
+  - References a Layer (which references an Asset)
+  - Has baseTransform (position, scale, rotation, opacity)
+
+OPERATION NODE
+  - Applies effects/transforms to upstream signal
+  - Types: blur, color_correct, transform
+  - Can be enabled/disabled
+  - Chained together via edges
+
+TRANSFORM
+  - Can be applied at two levels:
+    1. Layer baseTransform (edited via SourceNode)
+    2. Transform operation (edited via OperationNode)
+  - Each transform acts on the RESULT of upstream transforms
+  - Bounds calculation accumulates through the chain
+
+CHAIN RENDERING
+  - Each node renders its upstream chain
+  - Transforms expand canvas to prevent clipping
+  - GPU effects are batched for efficiency
+  - Results are cached when parameters unchanged
+
+
+================================================================================
+9. EXTERNAL DEPENDENCIES
+================================================================================
+
+React Ecosystem:
+  - React 18
+  - @xyflow/react (ReactFlow) - Node graph UI
+  - react-moveable - Transform handles
+
+State Management:
+  - Zustand - State management with persistence
+
+UI Components:
+  - Tailwind CSS
+  - Shadcn/ui (Radix primitives)
+  - Lucide React (icons)
+  - cmdk (command menu)
+
+Video Processing:
+  - mp4box.js - MP4 parsing/demuxing
+  - WebCodecs API - Video decoding
+
+Graphics:
+  - WebGL2 - GPU rendering
+  - Canvas 2D - Transform operations
+  - OffscreenCanvas - Offscreen rendering
+
+
+================================================================================

@@ -136,16 +136,36 @@ export function EditModeOverlay() {
     }
   };
 
+  // Calculate the edit area bounds (with padding for transform handles)
+  const editAreaPadding = 100;
+  const editAreaLeft = viewerScreenX - editAreaPadding;
+  const editAreaTop = viewerScreenY - editAreaPadding;
+  const editAreaWidth = scaledWidth + editAreaPadding * 2;
+  const editAreaHeight = scaledHeight + editAreaPadding * 2;
+
   return createPortal(
-    <div ref={overlayRef} className="fixed inset-0 z-50">
-      {/* Backdrop - dims the rest of the canvas */}
+    <div ref={overlayRef} className="fixed inset-0 z-50 pointer-events-none ">
+      {/* Clickable backdrop (transparent) - exits edit mode when clicking outside */}
       <div
-        className="absolute inset-0 bg-black/60"
+        className="absolute inset-0 pointer-events-auto"
         onClick={exitEditMode}
+      />
+
+      {/* Edit area with dashed border */}
+      <div
+        className="absolute pointer-events-auto"
+        style={{
+          left: editAreaLeft,
+          top: editAreaTop,
+          width: editAreaWidth,
+          height: editAreaHeight,
+        }}
+        onClick={(e) => e.stopPropagation()}
       />
 
       {/* Edit Canvas - for source node editing (layer.baseTransform) */}
       {isSourceEditMode && layer && (
+        <div className="pointer-events-auto z-20 ">
         <EditCanvas
           layer={layer}
           viewerScreenX={viewerScreenX}
@@ -158,10 +178,12 @@ export function EditModeOverlay() {
           }}
           onExit={exitEditMode}
         />
+        </div>
       )}
 
       {/* Transform Edit Canvas - for transform operation node editing */}
       {isTransformEditMode && operationNode && layerDimensions && contentBounds && (
+        <div className="pointer-events-auto z-20">
         <TransformEditCanvas
           operationNode={operationNode}
           layerDimensions={layerDimensions}
@@ -174,6 +196,7 @@ export function EditModeOverlay() {
           onTransformChange={handleTransformParamsChange}
           onExit={exitEditMode}
         />
+        </div>
       )}
     </div>,
     document.body

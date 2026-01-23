@@ -146,8 +146,9 @@ async function cleanupAssetFiles(asset: Asset): Promise<void> {
  * Create a new empty root composition
  */
 function createRootComposition(): CompositionAsset {
+  console.log("Composition root create");
   const now = Date.now();
-  const defaultDuration = 300; // 10 seconds at 30fps
+  const defaultDuration = 900; // 10 seconds at 30fps
   return {
     id: `comp_root_${now}`,
     type: 'composition',

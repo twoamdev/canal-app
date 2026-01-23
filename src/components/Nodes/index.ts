@@ -1,6 +1,8 @@
-// New architecture components
+// Base component
+export { BaseNodeComponent, NODE_VARIANTS, type NodeVariant, type BaseNodeComponentProps } from './BaseNodeComponent';
+
+// Node components
 export { SourceNodeComponent } from './SourceNodeComponent';
 export { OperationNodeComponent } from './OperationNodeComponent';
+export { EmptyNodeComponent } from './EmptyNodeComponent';
 
-// BaseNode as fallback for unknown node types
-//export { BaseNode } from './BaseNode';
