@@ -1,0 +1,308 @@
+================================================================================
+                        TRANSFORM FLOW ARCHITECTURE
+================================================================================
+
+================================================================================
+1. DATA TYPES
+================================================================================
+
+src/types/scene-graph.ts
+├── Transform (for Layer.baseTransform)
+│   ├── position: { x, y }
+│   ├── scale: { x, y }
+│   ├── rotation: number (degrees)
+│   ├── opacity: number (0-1)
+│   └── anchorPoint: { x, y } (0.5, 0.5 = center)
+│
+└── TransformParams (for OperationNode.params when type='transform')
+    ├── position: { x, y }
+    ├── scale: { x, y }
+    ├── rotation: number
+    └── anchorPoint: { x, y }
+    (No opacity - only used in effect chains)
+
+================================================================================
+2. DATA HIERARCHY
+================================================================================
+
+Layer (src/stores/layerStore.ts)
+│
+├── id: string
+├── assetId: string
+├── baseTransform: Transform  ◄── FIRST transform applied
+├── effects: string[]         ◄── IDs of connected OperationNodes
+├── timeRange: TimeRange
+└── name: string
+
+OperationNode (stored in composition.graph.nodes)
+│
+├── type: 'operation'
+├── operationType: 'blur' | 'color_correct' | 'transform'
+├── params: OperationParams   ◄── TransformParams if transform type
+├── isEnabled: boolean
+└── label: string
+
+================================================================================
+3. STORAGE ARCHITECTURE
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              STORES                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  LayerStore (src/stores/layerStore.ts)                                      │
+│  ├── layers: Record<string, Layer>                                          │
+│  ├── updateLayer(id, { baseTransform })  ◄── Edits layer transforms        │
+│  └── Persisted to localStorage                                              │
+│                                                                             │
+│  AssetStore (src/stores/assetStore.ts)  ◄── SOURCE OF TRUTH                 │
+│  ├── assets[compositionId].graph.nodes  ◄── Contains OperationNodes        │
+│  ├── updateNodeInComposition(compId, nodeId, { params })                    │
+│  └── Persisted to IndexedDB                                                 │
+│                                                                             │
+│  GraphStore (src/stores/graphStore.ts)  ◄── BRIDGE TO REACTFLOW             │
+│  ├── Computed from AssetStore                                               │
+│  ├── updateNode(id, updates) → delegates to AssetStore                      │
+│  └── Handles ReactFlow node/edge changes                                    │
+│                                                                             │
+│  EditModeStore (src/stores/editModeStore.ts)                                │
+│  ├── editingNodeId, editingLayerId, editingOperationNodeId                  │
+│  ├── viewerInfo: { offsetX, offsetY, width, height, initialZoom }           │
+│  ├── contentBounds: BoundingBox (for transform op editing)                  │
+│  ├── enterEditMode()         ◄── Source node editing                        │
+│  └── enterTransformEditMode() ◄── Operation node editing                    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+4. EDIT MODE FLOW
+================================================================================
+
+SOURCE NODE EDITING (layer.baseTransform)
+─────────────────────────────────────────
+
+User clicks selected SourceNode viewer
+           │
+           ▼
+SourceNodeComponent.handleViewerClick()
+           │
+           ▼
+enterEditMode(nodeId, layerId, viewerInfo)
+           │
+           ▼
+EditModeOverlay renders EditCanvas
+           │
+           ▼
+EditCanvas shows:
+├── Asset preview with transform applied
+├── Dashed outline (layer bounds)
+└── Moveable handles (drag/rotate/scale)
+           │
+           ▼
+User drags/rotates/scales
+           │
+           ▼
+onDrag/onRotate/onScale → local state update (smooth)
+           │
+           ▼
+onDragEnd/onRotateEnd/onScaleEnd
+           │
+           ▼
+onTransformChange(newTransform)
+           │
+           ▼
+updateLayer(layerId, { baseTransform: newTransform })
+           │
+           ▼
+LayerStore updates → useChainRenderer re-renders
+
+
+OPERATION NODE EDITING (OperationNode.params)
+─────────────────────────────────────────────
+
+User clicks selected OperationNode (transform type) viewer
+           │
+           ▼
+OperationNodeComponent.handleViewerClick()
+           │
+           ▼
+Calculate upstream chain:
+├── Find source node via findUpstreamChain()
+├── Get sourceLayer.baseTransform
+├── Collect upstream transform operations (before this node)
+└── calculateAccumulatedBounds() → contentBounds
+           │
+           ▼
+enterTransformEditMode(nodeId, operationNodeId, viewerInfo, contentBounds, layerDimensions)
+           │
+           ▼
+EditModeOverlay renders TransformEditCanvas
+           │
+           ▼
+TransformEditCanvas shows:
+├── Dashed outline (original layer dimensions)
+├── Blue rect (content bounds from upstream transforms)
+└── Moveable handles on content bounds
+           │
+           ▼
+User drags/rotates/scales
+           │
+           ▼
+onTransformChange(newTransformParams)
+           │
+           ▼
+updateNode(operationNodeId, { params: newTransformParams })
+           │
+           ▼
+GraphStore → AssetStore → useChainRenderer re-renders
+
+================================================================================
+5. RENDERING PIPELINE
+================================================================================
+
+src/hooks/useChainRenderer.ts
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         CHAIN RENDERING FLOW                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. LOAD SOURCE FRAME                                                       │
+│     └── loadAssetFrame(asset, sourceFrame) → ImageBitmap                    │
+│                                                                             │
+│  2. APPLY BASE TRANSFORM (src/hooks/useChainRenderer.ts)                    │
+│     │                                                                       │
+│     ├── calculateTransformedBounds(width, height, baseTransform)            │
+│     │   └── Returns AABB of rotated/scaled rectangle                        │
+│     │                                                                       │
+│     ├── Create OffscreenCanvas (expanded to fit all content)                │
+│     │   ├── minX = min(0, bounds.x)                                         │
+│     │   ├── maxX = max(srcWidth, bounds.x + bounds.width)                   │
+│     │   └── Canvas size = (maxX - minX) × (maxY - minY)                     │
+│     │                                                                       │
+│     └── Apply 2D transform:                                                 │
+│         ctx.translate(offsetX + anchorX, offsetY + anchorY)                 │
+│         ctx.translate(position.x, position.y)                               │
+│         ctx.rotate(rotation * Math.PI / 180)                                │
+│         ctx.scale(scale.x, scale.y)                                         │
+│         ctx.translate(-anchorX, -anchorY)                                   │
+│         ctx.drawImage(bitmap, 0, 0)                                         │
+│                                                                             │
+│  3. PROCESS OPERATION NODES (in chain order)                                │
+│     │                                                                       │
+│     ├── Transform operations → applyTransformOperation()                    │
+│     │   └── Same logic as baseTransform, expands canvas as needed           │
+│     │                                                                       │
+│     └── GPU operations (blur, color_correct)                                │
+│         ├── Batch consecutive GPU ops                                       │
+│         ├── Upload to WebGL                                                 │
+│         ├── Execute effect pipeline                                         │
+│         └── Read pixels back                                                │
+│                                                                             │
+│  4. DRAW TO DISPLAY CANVAS                                                  │
+│     └── canvasRef.current → final output                                    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+6. TRANSFORM UTILS
+================================================================================
+
+src/utils/transform-utils.ts
+
+calculateTransformedBounds(width, height, transform)
+├── Input: original dimensions + transform params
+├── Algorithm:
+│   1. Define 4 corners of original rect
+│   2. Apply transform to each corner:
+│      - Translate to anchor
+│      - Scale
+│      - Rotate
+│      - Translate by position
+│   3. Find min/max X and Y
+└── Output: BoundingBox { x, y, width, height, centerX, centerY }
+
+calculateAccumulatedBounds(width, height, baseTransform, chainTransforms[])
+├── Input: original dims + baseTransform + array of TransformParams
+├── Algorithm:
+│   1. Start with baseTransform bounds
+│   2. For each chainTransform:
+│      - Apply transform to previous bounds
+│      - Expand bounds to fit
+└── Output: Final accumulated BoundingBox
+
+================================================================================
+7. FILE REFERENCE
+================================================================================
+
+TYPES
+├── src/types/scene-graph.ts         Transform, TransformParams, Layer
+
+STORES
+├── src/stores/layerStore.ts         Layer.baseTransform storage
+├── src/stores/assetStore.ts         OperationNode.params storage
+├── src/stores/graphStore.ts         ReactFlow bridge, updateNode()
+├── src/stores/editModeStore.ts      Edit mode state
+
+EDIT UI
+├── src/components/edit-mode/EditModeOverlay.tsx    Portal overlay
+├── src/components/edit-mode/EditCanvas.tsx         baseTransform editing
+├── src/components/edit-mode/TransformEditCanvas.tsx OperationNode editing
+
+RENDERING
+├── src/hooks/useChainRenderer.ts    Main rendering pipeline
+├── src/utils/transform-utils.ts     Bounds calculations
+
+COMPONENTS
+├── src/components/nodes/SourceNodeComponent.tsx     Preview with baseTransform
+├── src/components/nodes/OperationNodeComponent.tsx  Preview with chain
+├── src/components/panels/PropertiesPanel.tsx        Slider controls
+
+================================================================================
+8. CHAIN EXAMPLE
+================================================================================
+
+SourceNode (500×500 image)
+│
+├── layer.baseTransform:
+│   ├── position: { x: 100, y: 50 }
+│   ├── scale: { x: 1, y: 1 }
+│   └── rotation: 45°
+│
+│   Result: Content now ~707×707 (rotated diagonal), offset by (100, 50)
+│
+▼
+OperationNode[0] (type: 'transform')
+│
+├── params (TransformParams):
+│   ├── position: { x: 20, y: 0 }
+│   ├── scale: { x: 0.5, y: 0.5 }
+│   └── rotation: 0°
+│
+│   Sees: 707×707 content from upstream
+│   Result: Scaled to ~354×354, shifted right by 20px
+│
+▼
+OperationNode[1] (type: 'blur')
+│
+│   Sees: 354×354 transformed content
+│   Result: Blurred version
+│
+▼
+Output Canvas
+
+================================================================================
+9. UPDATE FLOW SUMMARY
+================================================================================
+
+baseTransform Change:
+User → EditCanvas → updateLayer() → LayerStore → useChainRenderer → Display
+
+OperationNode Transform Change:
+User → TransformEditCanvas → updateNode() → GraphStore → AssetStore
+     → useChainRenderer → Display
+
+Properties Panel Change:
+User → PropertiesPanel → updateTransform() → updateLayer() → LayerStore
+     → useChainRenderer → Display
+
+================================================================================

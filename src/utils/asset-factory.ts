@@ -809,7 +809,7 @@ export function createCompositionAsset(
   options: CreateCompositionAssetOptions = {}
 ): CompositionAsset {
   const { durationFrames = fps * 10 } = options; // Default 10 seconds
-  const { workAreaStart = 0, workAreaEnd = durationFrames } = options;
+  const { workAreaStart = 1, workAreaEnd = durationFrames } = options;
 
   const now = Date.now();
 

@@ -127,7 +127,7 @@ export function EditCanvas({
   return (
     <div
       onClick={handleCanvasClick}
-      className="absolute bg-transparent overflow-hidden rounded-sm"
+      className="absolute bg-transparent overflow-hidden rounded-sm border"
       style={{
         left: canvasLeft,
         top: canvasTop,
@@ -137,7 +137,7 @@ export function EditCanvas({
     >
       {/* Checkerboard background pattern */}
       <div
-        className="absolute inset-0 opacity-100 pointer-events-none"
+        className="absolute inset-0 opacity-0 pointer-events-none"
         style={{
           backgroundImage: `
             repeating-conic-gradient(

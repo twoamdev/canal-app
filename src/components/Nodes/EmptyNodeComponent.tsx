@@ -46,7 +46,7 @@ export function EmptyNodeComponent({ id, data: _data, selected }: EmptyNodeCompo
     >
       <div className="text-xs text-muted-foreground">
         <div
-          className="relative rounded overflow-hidden"
+          className="relative overflow-hidden"
           style={{
             width: DEFAULT_VIEWER_WIDTH,
             height: DEFAULT_VIEWER_HEIGHT,

@@ -66,8 +66,8 @@ export interface TimeRange {
  */
 export function createDefaultTimeRange(frameCount: number): TimeRange {
   return {
-    inFrame: 0,
-    outFrame: frameCount,
+    inFrame: 1,
+    outFrame: frameCount + 1,
     sourceOffset: 0,
   };
 }
@@ -183,6 +183,11 @@ interface BaseSceneNode {
   position: Position2D;
   /** Whether the node is selected */
   selected?: boolean;
+  /** Measured dimensions from ReactFlow (required for node initialization) */
+  measured?: {
+    width: number;
+    height: number;
+  };
   /** Index signature for ReactFlow compatibility */
   [key: string]: unknown;
 }

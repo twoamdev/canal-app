@@ -12,14 +12,14 @@
 
 import { useCallback, useEffect, type ReactNode } from 'react';
 import { Handle, Position, useViewport, useUpdateNodeInternals, useReactFlow } from '@xyflow/react';
-import type { LucideIcon } from 'lucide-react';
+import { type LucideIcon, ArrowDown } from 'lucide-react';
 import { useGraphStore } from '../../stores/graphStore';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
 // Handle size constant
-const HANDLE_BASE_SIZE = 14;
+const HANDLE_BASE_SIZE = 20;
 
 // Variant styles for different node types
 export const NODE_VARIANTS = {
@@ -208,88 +208,117 @@ export function BaseNodeComponent({
 
   return (
     <div>
-<div 
-  className="flex items-center absolute bottom-full left-0 origin-bottom-left"
-  style={{
-    transform: `scale(${1 / zoom})`,
-    width: `${zoom * 100}%` 
-  }}
->
-  {/* Added 'gap-2' for breathing room */}
-  <div className="flex items-baseline justify-between w-full gap-2">
-    
-    {/* 1. min-w-0 is CRITICAL here. It allows the flex item to shrink below its text width */}
-    <p className="text-sm font-normal text-muted-foreground truncate min-w-0">
-      {label}
-    </p>
+      <div
+        className="flex items-center absolute bottom-full left-0 origin-bottom-left"
+        style={{
+          transform: `scale(${1 / zoom})`,
+          width: `${zoom * 100}%`
+        }}
+      >
+        {/* Added 'gap-2' for breathing room */}
+        <div className="flex items-baseline justify-between w-full">
 
-    {subLabel && selected && (
-      // 2. Added truncate + max-w constraint so the sublabel doesn't eat the whole bar
-      <p className="text-sm text-muted-foreground tabular-nums bg-zinc-700 rounded-xs px-1 truncate min-w-0 max-w-[50%]">
-        {subLabel}
-      </p>
-    )}
-  </div>
-  {headerExtra}
-</div>
-    <Card
-      className={cn(
-        'min-w-[200px] transition-all duration-200 ring-2',
-        selected ? styles.ringSelected : styles.ring,
-        'hover:shadow-lg',
-        !isEnabled && 'opacity-60'
-      )}
-    >
-      {/* Input handle on top */}
-      {hasInputHandle && (
-        <Handle
-          type="target"
-          position={Position.Top}
-          className={cn(
-            '!bg-muted-foreground hover:!bg-foreground transition-colors cursor-pointer',
-            isValidTargetTarget && '!bg-primary !scale-125'
-          )}
-          style={{
-            width: HANDLE_BASE_SIZE / zoom,
-            height: HANDLE_BASE_SIZE / zoom,
-            top: -(HANDLE_BASE_SIZE / zoom),
-          }}
-          onClick={handleTargetClick}
-        />
-      )}
+          {/* 1. min-w-0 is CRITICAL here. It allows the flex item to shrink below its text width */}
+          <p className="text-sm font-normal text-muted-foreground truncate min-w-0">
+            {label}
+          </p>
 
-      {/* Node content */}
-      <div className="flex flex-col gap-2">
-     
-        {/* Viewer area */}
-        <div
-          onClick={onViewerClick}
-          className={cn(
-            viewerClickable && selected && 'cursor-pointer'
+          {subLabel && selected && (
+            // 2. Added truncate + max-w constraint so the sublabel doesn't eat the whole bar
+            <p className="text-sm text-muted-foreground tabular-nums bg-zinc-700 rounded-xs px-1 truncate min-w-0 max-w-[50%]">
+              {subLabel}
+            </p>
           )}
-        >
-          {children}
         </div>
+        {headerExtra}
       </div>
+      <Card
+        className={cn(
+          'min-w-[200px] !rounded-[0px] !border-0 transition-all duration-200',
+          selected ? styles.ringSelected : styles.ring,
+          'hover:shadow-lg',
+          !isEnabled && 'opacity-60'
+        )}
+      >
+        {/* Input handle on top */}
+        {hasInputHandle && (
+          <Handle
+            type="target"
+            position={Position.Top}
+            className={cn(
+              // 1. Mirrored styles: rounded, no border, dark background
+              '!rounded-md !border-0 !bg-zinc-800 hover:!bg-foreground transition-colors',
+              // 2. Added Flexbox to center the icon
+              'flex items-center justify-center',
+              isValidTargetTarget && '!bg-primary !scale-125'
+            )}
+            style={{
+              width: HANDLE_BASE_SIZE / zoom,
+              height: HANDLE_BASE_SIZE / zoom,
+              top: -((HANDLE_BASE_SIZE /2)/ zoom),
+            }}
+            onClick={handleTargetClick}
+          >
+            {/* 3. Icon: ArrowDown signifies flow entering from above */}
+            <ArrowDown
+              // pointer-events-none is crucial for the handle to accept connections
+              className="text-zinc-600 pointer-events-none"
+              style={{
+                width: '65%',
+                height: '65%',
+                strokeWidth: 2,
+              }}
+            />
+          </Handle>
+        )}
+        {/* Node content */}
+        <div className="flex flex-col">
 
-      {/* Output handle on bottom */}
-      {hasOutputHandle && (
-        <Handle
-          type="source"
-          position={Position.Bottom}
-          className={cn(
-            '!bg-muted-foreground hover:!bg-foreground transition-colors cursor-pointer',
-            isValidSourceTarget && '!bg-primary !scale-125'
-          )}
-          style={{
-            width: HANDLE_BASE_SIZE / zoom,
-            height: HANDLE_BASE_SIZE / zoom,
-            bottom: -(HANDLE_BASE_SIZE / zoom),
-          }}
-          onClick={handleSourceClick}
-        />
-      )}
-    </Card>
+          {/* Viewer area */}
+          <div
+            onClick={onViewerClick}
+            className={cn(
+              viewerClickable && selected && 'cursor-pointer'
+            )}
+          >
+            {children}
+          </div>
+        </div>
+
+        {/* Output handle on bottom */}
+        {hasOutputHandle && (
+
+          <Handle
+            type="source"
+            position={Position.Bottom}
+            className={cn(
+              // 1. Existing styles
+              '!rounded-md  !border-0 !bg-zinc-800 hover:!bg-foreground transition-colors cursor-pointer',
+              // 2. NEW: Use Flexbox to center the icon inside the handle
+              'flex items-center justify-center',
+              isValidSourceTarget && '!bg-primary !scale-125'
+            )}
+            style={{
+              width: HANDLE_BASE_SIZE / zoom,
+              height: HANDLE_BASE_SIZE / zoom,
+              bottom: -((HANDLE_BASE_SIZE /2)/ zoom),
+            }}
+            onClick={handleSourceClick}
+          >
+            {/* 3. The Icon */}
+            <ArrowDown
+              // pointer-events-none ensures the click/drag registers on the Handle, not the SVG
+              className="text-zinc-600 pointer-events-none"
+              style={{
+                // 4. Use percentages so the icon scales perfectly with your dynamic handle size
+                width: '65%',
+                height: '65%',
+                strokeWidth: 2, // Thicker stroke usually looks better at small sizes
+              }}
+            />
+          </Handle>
+        )}
+      </Card>
     </div>
   );
 }

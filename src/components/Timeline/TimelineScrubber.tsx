@@ -247,7 +247,7 @@ export function TimelineScrubber() {
   const handleStartBlur = useCallback(() => {
     setIsEditingStart(false);
     const value = parseInt(startInputValue, 10);
-    if (!isNaN(value) && value >= 0 && value < frameEnd) {
+    if (!isNaN(value) && value >= 1 && value < frameEnd) {
       setFrameRange(value, frameEnd);
     }
   }, [startInputValue, frameEnd, setFrameRange]);

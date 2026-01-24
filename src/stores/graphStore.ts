@@ -154,6 +154,8 @@ function sceneNodeToFlowNode(node: SceneNode): FlowNode {
     draggable: true,
     selectable: true,
     connectable: true,
+    // Include measured dimensions if available (required for node initialization)
+    ...(node.measured && { measured: node.measured }),
   };
 }
 
@@ -359,7 +361,18 @@ export const useGraphStore = create<GraphState>()(() => ({
           break;
 
         case 'dimensions':
-          // ReactFlow dimension updates - can ignore for scene graph
+          // ReactFlow needs dimension updates to consider nodes "initialized"
+          // We need to store measured dimensions for proper dragging
+          if (change.dimensions) {
+            useAssetStore
+              .getState()
+              .updateNodeInComposition(compositionId, change.id, {
+                measured: {
+                  width: change.dimensions.width,
+                  height: change.dimensions.height,
+                },
+              });
+          }
           break;
 
         case 'add':
@@ -505,6 +518,8 @@ export function useGraphNodes(): FlowNode[] {
     draggable: true,
     selectable: true,
     connectable: true,
+    // Include measured dimensions if available (required for node initialization)
+    ...(node.measured && { measured: node.measured }),
   }));
 }
 

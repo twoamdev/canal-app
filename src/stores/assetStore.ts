@@ -158,7 +158,7 @@ function createRootComposition(): CompositionAsset {
     dimensions: { width: 1920, height: 1080 },
     fps: 30,
     durationFrames: defaultDuration,
-    workAreaStart: 0,
+    workAreaStart: 1,
     workAreaEnd: defaultDuration,
     createdAt: now,
     updatedAt: now,

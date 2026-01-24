@@ -44,9 +44,9 @@ interface TimelineState {
 export const useTimelineStore = create<TimelineState>((set, get) => ({
 
   // Initial state
-  currentFrame: 0,
-  frameStart: 0,
-  frameEnd: 299, // 300 frames (0-299)
+  currentFrame: 1,
+  frameStart: 1,
+  frameEnd: 300, // 300 frames (1-300)
   isPlaying: false,
   isLooping: true,
   fps: 30,

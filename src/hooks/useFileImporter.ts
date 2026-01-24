@@ -225,7 +225,7 @@ export function useFileImporter() {
 
         const actualFrameCount = getAssetFrameCount(processedAsset);
         updateLayer(layerId, {
-          timeRange: { inFrame: 0, outFrame: actualFrameCount, sourceOffset: 0 },
+          timeRange: { inFrame: 1, outFrame: actualFrameCount + 1, sourceOffset: 0 },
         });
 
         if (actualFrameCount > maxFrameCount) maxFrameCount = actualFrameCount;
@@ -263,7 +263,7 @@ export function useFileImporter() {
 
         const actualFrameCount = getAssetFrameCount(processedAsset);
         updateLayer(layerId, {
-          timeRange: { inFrame: 0, outFrame: actualFrameCount, sourceOffset: 0 },
+          timeRange: { inFrame: 1, outFrame: actualFrameCount + 1, sourceOffset: 0 },
         });
 
         if (actualFrameCount > maxFrameCount) maxFrameCount = actualFrameCount;
@@ -279,7 +279,7 @@ export function useFileImporter() {
     }
 
     if (maxFrameCount > frameEnd) {
-      setFrameRange(0, maxFrameCount);
+      setFrameRange(1, maxFrameCount);
     }
 
     setState({ isProcessing: false, progress: null, error: null });

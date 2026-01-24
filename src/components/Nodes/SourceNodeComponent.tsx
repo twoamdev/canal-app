@@ -303,7 +303,7 @@ export function SourceNodeComponent({ id, data, selected }: SourceNodeComponentP
       {/* Preview content with transform applied */}
       <div
         className={cn(
-          'text-xs text-muted-foreground rounded overflow-hidden transition-all relative',
+          'text-xs text-muted-foreground overflow-hidden transition-all relative',
           selected && 'ring-2 ring-primary/30 hover:ring-primary/50'
         )}
         style={{

@@ -1,0 +1,101 @@
+/* =============================================================================
+   ReactFlow Custom Styles
+
+   Import this AFTER @xyflow/react/dist/style.css and Tailwind
+   ============================================================================= */
+
+/* -----------------------------------------------------------------------------
+   Canvas / Pane
+   ----------------------------------------------------------------------------- */
+.react-flow__pane {
+  cursor: default !important;
+}
+
+.react-flow__pane:active {
+  cursor: grabbing !important;
+} 
+
+.react-flow__pane.dragging {
+  cursor: grabbing !important;
+} 
+
+/* .react-flow__pane.selection {
+  cursor: crosshair !important;
+} */
+
+/* -----------------------------------------------------------------------------
+   Nodes
+   ----------------------------------------------------------------------------- */
+.react-flow__node {
+  cursor: pointer !important;
+}
+
+/* .react-flow__node:hover {
+  cursor: grab !important;
+} */
+
+.react-flow__node.selected {
+  cursor: grab !important;
+} 
+
+.react-flow__node.dragging {
+  cursor: grabbing !important;
+} 
+
+/* .react-flow__node.selectable:hover {
+  cursor: pointer !important;
+} */
+
+/* -----------------------------------------------------------------------------
+   Handles
+   ----------------------------------------------------------------------------- */
+.react-flow__handle {
+  cursor: pointer !important;
+}
+
+/* .react-flow__handle:hover {
+  cursor: cell !important;
+} */
+
+ .react-flow__handle.connecting {
+  cursor: crosshair !important;
+} 
+/*
+ .react-flow__handle.valid {
+  cursor: alias !important;
+} */
+
+/* .react-flow__handle-top {
+  cursor: n-resize !important;
+} */
+
+/* \.react-flow__handle-bottom {
+  cursor: s-resize !important;
+} */
+
+/* -----------------------------------------------------------------------------
+   Edges
+   ----------------------------------------------------------------------------- */
+/* .react-flow__edge {
+  cursor: pointer !important;
+} */
+
+/*
+.react-flow__edge:hover {
+  cursor: pointer !important;
+} */
+
+/* .react-flow__edge.selected {
+  cursor: move !important;
+} */
+
+/* -----------------------------------------------------------------------------
+   Selection Box
+   ----------------------------------------------------------------------------- */
+/* .react-flow__selection {
+  cursor: move !important;
+} */
+
+/* .react-flow__nodesselection-rect {
+  cursor: move !important;
+} */
