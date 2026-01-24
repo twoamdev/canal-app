@@ -4,6 +4,7 @@ import { useCommandMenuStore } from '../stores/commandMenuStore';
 import { useEditModeStore } from '../stores/editModeStore';
 import { useAssetStore } from '../stores/assetStore';
 import { useCompositionStore } from '../stores/compositionStore';
+import { usePanelStore } from '../stores/panelStore';
 
 interface HotkeyAction {
   key: string;
@@ -15,7 +16,7 @@ interface HotkeyAction {
 }
 
 export function useCanvasHotkeys() {
-  const { zoomIn, zoomOut, fitView, setViewport, getViewport } = useReactFlow();
+  const { zoomIn, zoomOut, fitView, setViewport, getViewport, getNode } = useReactFlow();
   const openCommandMenu = useCommandMenuStore((state) => state.open);
 
   // Get helper to find selected node
@@ -45,13 +46,41 @@ export function useCanvasHotkeys() {
           return;
         }
         const selectedNodeId = getSelectedNodeId();
-        if (selectedNodeId) {
-          fitView({
-            nodes: [{ id: selectedNodeId }],
-            duration: 150,
-            padding: 0.2,
-          });
-        }
+        if (!selectedNodeId) return;
+
+        const node = getNode(selectedNodeId);
+        if (!node) return;
+
+        // Get node dimensions (use measured if available, fallback to reasonable defaults)
+        const nodeWidth = node.measured?.width ?? 200;
+        const nodeHeight = node.measured?.height ?? 200;
+
+        // Get panel state
+        const { isPropertiesPanelOpen, propertiesPanelWidth } = usePanelStore.getState();
+
+        // Calculate available viewport dimensions
+        const panelOffset = isPropertiesPanelOpen ? propertiesPanelWidth : 0;
+        const availableWidth = window.innerWidth - panelOffset;
+        const availableHeight = window.innerHeight;
+
+        // Calculate zoom to fit node with padding (10% on each side)
+        const padding = 0.1;
+        const paddedWidth = nodeWidth * (1 + padding * 2);
+        const paddedHeight = nodeHeight * (1 + padding * 2);
+        const zoomX = availableWidth / paddedWidth;
+        const zoomY = availableHeight / paddedHeight;
+        const zoom = Math.min(zoomX, zoomY, 4); // Cap at max zoom of 4
+
+        // Calculate node center in flow coordinates
+        const nodeCenterX = node.position.x + nodeWidth / 2;
+        const nodeCenterY = node.position.y + nodeHeight / 2;
+
+        // Calculate viewport position to center node in available space
+        // Available space center is at (availableWidth/2, availableHeight/2)
+        const viewportX = availableWidth / 2 - nodeCenterX * zoom;
+        const viewportY = availableHeight / 2 - nodeCenterY * zoom;
+
+        setViewport({ x: viewportX, y: viewportY, zoom }, { duration: 150 });
       },
       description: 'Zoom to selected node',
     },
@@ -97,7 +126,7 @@ export function useCanvasHotkeys() {
       description: 'Reset zoom to 100%',
     },
     // Add more hotkeys here as needed
-  ], [zoomIn, zoomOut, fitView, setViewport, getViewport, openCommandMenu, getSelectedNodeId]);
+  ], [zoomIn, zoomOut, fitView, setViewport, getViewport, getNode, openCommandMenu, getSelectedNodeId]);
 
   useEffect(() => {
     const hotkeys = getHotkeys();
