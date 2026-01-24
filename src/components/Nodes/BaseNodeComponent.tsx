@@ -10,7 +10,7 @@
  * - Handle rendering with zoom-invariant scaling
  */
 
-import { useCallback, useEffect, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, useRef, type ReactNode } from 'react';
 import { Handle, Position, useViewport, useUpdateNodeInternals, useReactFlow } from '@xyflow/react';
 import { type LucideIcon, ArrowDown } from 'lucide-react';
 import { useGraphStore } from '../../stores/graphStore';
@@ -76,6 +76,8 @@ export interface BaseNodeComponentProps {
   onViewerClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
   /** Whether viewer should show pointer cursor */
   viewerClickable?: boolean;
+  /** Callback when label is changed (if provided, label becomes editable) */
+  onLabelChange?: (newLabel: string) => void;
   /** Content to render in the viewer area */
   children: ReactNode;
 }
@@ -93,6 +95,7 @@ export function BaseNodeComponent({
   headerExtra,
   onViewerClick,
   viewerClickable = false,
+  onLabelChange,
   children,
 }: BaseNodeComponentProps) {
   // ReactFlow hooks
@@ -108,6 +111,57 @@ export function BaseNodeComponent({
 
   // Get styles for variant
   const styles = NODE_VARIANTS[variant];
+
+  // Editable label state
+  const [isEditingLabel, setIsEditingLabel] = useState(false);
+  const [editedLabel, setEditedLabel] = useState(label);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Sync edited label when prop changes (e.g., undo/redo)
+  useEffect(() => {
+    if (!isEditingLabel) {
+      setEditedLabel(label);
+    }
+  }, [label, isEditingLabel]);
+
+  // Focus input when entering edit mode
+  useEffect(() => {
+    if (isEditingLabel && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditingLabel]);
+
+  // Handle label click to enter edit mode
+  const handleLabelClick = useCallback((e: React.MouseEvent) => {
+    if (selected && onLabelChange) {
+      e.stopPropagation();
+      setIsEditingLabel(true);
+    }
+  }, [selected, onLabelChange]);
+
+  // Handle saving the label
+  const handleLabelSave = useCallback(() => {
+    setIsEditingLabel(false);
+    const trimmedLabel = editedLabel.trim();
+    if (trimmedLabel && trimmedLabel !== label && onLabelChange) {
+      onLabelChange(trimmedLabel);
+    } else {
+      setEditedLabel(label); // Reset to original if empty or unchanged
+    }
+  }, [editedLabel, label, onLabelChange]);
+
+  // Handle key events in the input
+  const handleLabelKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleLabelSave();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setEditedLabel(label);
+      setIsEditingLabel(false);
+    }
+  }, [handleLabelSave, label]);
 
   // Update handle positions when zoom changes
   useEffect(() => {
@@ -218,13 +272,32 @@ export function BaseNodeComponent({
         {/* Added 'gap-2' for breathing room */}
         <div className="flex items-baseline justify-between w-full">
 
-          {/* 1. min-w-0 is CRITICAL here. It allows the flex item to shrink below its text width */}
-          <p className="text-sm font-normal text-muted-foreground truncate min-w-0">
-            {label}
-          </p>
+          {/* Editable label - shows input when editing, text otherwise */}
+          {isEditingLabel ? (
+            <input
+              ref={inputRef}
+              type="text"
+              value={editedLabel}
+              onChange={(e) => setEditedLabel(e.target.value)}
+              onBlur={handleLabelSave}
+              onKeyDown={handleLabelKeyDown}
+              className="text-sm font-normal text-foreground bg-zinc-800 border border-primary rounded px-1 outline-none"
+              style={{ caretColor: 'auto' }}
+            />
+          ) : (
+            <p
+              onClick={handleLabelClick}
+              className={cn(
+                'text-sm font-normal text-muted-foreground truncate min-w-0',
+                selected && onLabelChange && 'cursor-text hover:text-foreground'
+              )}
+            >
+              {label}
+            </p>
+          )}
 
-          {subLabel && selected && (
-            // 2. Added truncate + max-w constraint so the sublabel doesn't eat the whole bar
+          {subLabel && selected && !isEditingLabel && (
+            // Added truncate + max-w constraint so the sublabel doesn't eat the whole bar
             <p className="text-sm text-muted-foreground tabular-nums bg-zinc-700 rounded-xs px-1 truncate min-w-0 max-w-[50%]">
               {subLabel}
             </p>

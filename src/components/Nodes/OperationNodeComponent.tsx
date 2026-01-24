@@ -152,6 +152,11 @@ export function OperationNodeComponent({ id, data, selected }: OperationNodeComp
     enterTransformEditMode,
   ]);
 
+  // Handle label change
+  const handleLabelChange = useCallback((newLabel: string) => {
+    updateNode(id, { label: newLabel });
+  }, [id, updateNode]);
+
   // Enable toggle switch for header
   const headerToggle = (
     <Switch
@@ -174,6 +179,7 @@ export function OperationNodeComponent({ id, data, selected }: OperationNodeComp
       headerExtra={headerToggle}
       onViewerClick={handleViewerClick}
       viewerClickable={operationType === 'transform' && hasUpstream}
+      onLabelChange={handleLabelChange}
     >
       <AssetViewer
         canvasRef={canvasRef}

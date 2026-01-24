@@ -70,6 +70,7 @@ export function SourceNodeComponent({ id, data, selected }: SourceNodeComponentP
 
   // Stores
   const assets = useAssetStore((s) => s.assets);
+  const updateLayer = useLayerStore((s) => s.updateLayer);
   const enterEditMode = useEditModeStore((s) => s.enterEditMode);
 
   // ReactFlow
@@ -287,6 +288,11 @@ export function SourceNodeComponent({ id, data, selected }: SourceNodeComponentP
     ? 'Processing...'
     : `${dimensions.width} × ${dimensions.height}`;
 
+  // Handle label change
+  const handleLabelChange = useCallback((newLabel: string) => {
+    updateLayer(layer.id, { name: newLabel });
+  }, [layer.id, updateLayer]);
+
   return (
     <BaseNodeComponent
       id={id}
@@ -299,6 +305,7 @@ export function SourceNodeComponent({ id, data, selected }: SourceNodeComponentP
       variant={variant}
       onViewerClick={handleViewerClick}
       viewerClickable={true}
+      onLabelChange={handleLabelChange}
     >
       {/* Preview content with transform applied */}
       <div
